@@ -6,11 +6,7 @@
   <title>PvE Optimizer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #1c1917; color: #e0e0e0; min-height: 100vh;
-      display: flex; justify-content: center; padding: 24px 16px;
-    }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1c1917; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; padding: 24px 16px; }
     .container { max-width: 1400px; width: 100%; }
     h1 { text-align: center; color: #f5f0e8; font-size: 1.6rem; margin-bottom: 6px; }
     .sub { text-align: center; color: #78716c; font-size: .8rem; margin-bottom: 20px; }
@@ -19,18 +15,13 @@
     p { color: #a8a29e; line-height: 1.5; }
     .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .row + .row { margin-top: 10px; }
-    button {
-      background: #44403c; color: #f5f0e8; border: 1px solid #57534e; border-radius: 6px;
-      padding: 8px 14px; cursor: pointer; font-size: .85rem;
-    }
+    button { background: #44403c; color: #f5f0e8; border: 1px solid #57534e; border-radius: 6px; padding: 8px 14px; cursor: pointer; font-size: .85rem; }
     button:hover { background: #57534e; }
     button.primary { background: #6b5d3f; border-color: #8a7a52; font-weight: 600; }
     button.primary:hover { background: #8a7a52; }
-    textarea {
-      width: 100%; min-height: 90px; background: #1c1917; color: #e0e0e0;
-      border: 1px solid #44403c; border-radius: 6px; padding: 8px; font-family: monospace; font-size: .8rem;
-    }
-    input[type=number] { width: 70px; background: #1c1917; color: #e0e0e0; border: 1px solid #44403c; border-radius: 4px; padding: 4px 6px; }
+    textarea { width: 100%; min-height: 70px; background: #1c1917; color: #e0e0e0; border: 1px solid #44403c; border-radius: 6px; padding: 8px; font-family: monospace; font-size: .8rem; }
+    input[type=number], select { background: #1c1917; color: #e0e0e0; border: 1px solid #44403c; border-radius: 4px; padding: 4px 6px; }
+    input[type=number] { width: 70px; }
     label.chk { display: inline-flex; align-items: center; gap: 6px; background: #1c1917; border: 1px solid #44403c; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: .85rem; }
     label.chk.on { border-color: #8a7a52; background: #34302b; }
     .muted { color: #78716c; font-size: .8rem; }
@@ -52,7 +43,7 @@
     .label-wood { color: #a67c52; } .label-clay { color: #c4703f; }
     .label-iron { color: #9a9ab0; } .label-crop { color: #b8a078; }
     .status { font-size: .8rem; color: #a8a29e; margin-top: 8px; }
-    .err { color: #e08a5a; }
+    .ok { color: #9fd39f; } .err { color: #e08a5a; }
     .hidden { display: none; }
   </style>
 </head>
@@ -64,21 +55,23 @@
     <!-- 1. Data -->
     <div class="section">
       <div class="section-title">1 · Data</div>
+      <p class="muted" style="margin-bottom:10px">From the <b>Collector</b> userscript on your gameworld: <b>Scan oases</b>, then <b>Send page</b> from each relevant page (village sidebar, <i>expanded</i> farm lists, troops overview). Data accumulates here. Or import a saved page / JSON below.</p>
       <div class="row">
-        <button id="btnSample">Load sample data</button>
-        <button id="btnFile">Import JSON file…</button>
-        <input type="file" id="fileInput" accept=".json,application/json" class="hidden">
-        <span class="muted">…or paste the collector's JSON below.</span>
+        <button id="btnFile">Import file (.json / .htm)…</button>
+        <input type="file" id="fileInput" accept=".json,.htm,.html,application/json,text/html" class="hidden">
+        <button id="btnSample">Load sample</button>
+        <button id="btnClear">Clear data</button>
+        <span class="muted">Tribe:</span> <select id="tribeSel"></select>
       </div>
-      <div class="row"><textarea id="pasteBox" placeholder='{"tribe":"huns","mapRadius":200,"villages":[...],"oases":[...],"farmLists":[...]}'></textarea></div>
-      <div class="row"><button id="btnPaste">Load pasted JSON</button></div>
-      <div class="status" id="dataStatus">No data loaded.</div>
+      <div class="row"><textarea id="pasteBox" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
+      <div class="row"><button id="btnPaste">Load pasted</button></div>
+      <div class="status" id="dataStatus">Waiting for data…</div>
     </div>
 
     <!-- 2. Cavalry & filters -->
     <div class="section hidden" id="secCfg">
       <div class="section-title">2 · Cavalry &amp; filters</div>
-      <p class="muted" style="margin-bottom:8px">Tribe: <b id="tribeName">—</b>. Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed.</p>
+      <p class="muted" style="margin-bottom:8px">Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed.</p>
       <div class="row" id="cavRow"></div>
       <p class="muted" style="margin:12px 0 8px">Farm only these oasis resource types (double oases bucket by their primary/non-crop bonus):</p>
       <div class="row" id="resRow"></div>
@@ -93,7 +86,7 @@
 
     <!-- 3. Villages -->
     <div class="section hidden" id="secVil">
-      <div class="section-title">3 · Villages</div>
+      <div class="section-title">3 · Villages <span class="muted" style="text-transform:none;letter-spacing:0">— troop counts are editable; type them if not auto-filled from a troops page</span></div>
       <div class="scroll"><table id="vilTable"></table></div>
     </div>
 
@@ -123,118 +116,191 @@
   <script>
   (function () {
     'use strict';
-    var STATE = { data: null, units: null, tribe: null };
-
     var $ = function (id) { return document.getElementById(id); };
-    function el(tag, attrs, html) {
-      var e = document.createElement(tag);
-      if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
-      if (html != null) e.innerHTML = html;
-      return e;
-    }
-    function esc(s) {
-      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-      });
-    }
-    function serverBase() {
-      var s = ((STATE.data && STATE.data.server) || '').replace(/\/+$/, '');
-      return /^https?:\/\//i.test(s) ? s : ''; // only trust http(s) origins
-    }
-    function mapLink(x, y) {
-      var nx = Number(x), ny = Number(y);
-      if (!isFinite(nx) || !isFinite(ny)) return esc(x + '|' + y);
-      var href = serverBase() + '/karte.php?x=' + nx + '&y=' + ny;
-      return '<a href="' + esc(href) + '" target="_blank" rel="noopener">' + nx + '|' + ny + '</a>';
-    }
-    function resClass(r) { return 'label-' + esc(r); }
-    function typeLabel(bonuses) {
-      return (bonuses || []).map(function (b) {
-        return '<span class="' + resClass(b.res) + '">+' + Number(b.pct) + '% ' + esc(b.res) + '</span>';
-      }).join(', ');
-    }
-    function cav(tribe) { return (UNITS[tribe] || []).filter(function (u) { return u.type === 'c'; }); }
+    function el(tag, attrs, html) { var e = document.createElement(tag); if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
 
-    // ── solver availability ──
+    // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
+    var STORE = 'pveData';
+    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, villages: [], oases: [], farmLists: [] }; }
+    var STATE = { data: blank(), units: null, controls: false };
+    function persist() { try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); } catch (e) { /* quota */ } }
+    function restore() { try { var s = localStorage.getItem(STORE); if (s) STATE.data = JSON.parse(s); } catch (e) { STATE.data = blank(); } }
+
+    // ── text helpers ──
+    var U_MINUS = /−/g, U_MARKS = /[‪-‮⁦-⁩‎‏⁠]/g;
+    function numC(s) { var m = String(s == null ? '' : s).replace(U_MARKS, '').replace(U_MINUS, '-').match(/-?\d[\d.,]*\d|-?\d/); return m ? parseInt(m[0].replace(/[.,]/g, ''), 10) : NaN; }
+    function clean(s) { return String(s == null ? '' : s).replace(U_MARKS, '').replace(/\s+/g, ' ').trim(); }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function serverBase() { var s = (STATE.data.server || '').replace(/\/+$/, ''); return /^https?:\/\//i.test(s) ? s : ''; }
+    function mapLink(x, y) { var nx = Number(x), ny = Number(y); if (!isFinite(nx) || !isFinite(ny)) return esc(x + '|' + y); return '<a href="' + esc(serverBase() + '/karte.php?x=' + nx + '&y=' + ny) + '" target="_blank" rel="noopener">' + nx + '|' + ny + '</a>'; }
+    function resClass(r) { return 'label-' + esc(r); }
+    function typeLabel(b) { return (b || []).map(function (x) { return '<span class="' + resClass(x.res) + '">+' + Number(x.pct) + '% ' + esc(x.res) + '</span>'; }).join(', '); }
+    function cav(tribe) { return (UNITS[tribe] || []).filter(function (u) { return u.type === 'c'; }); }
+    var GAME_TRIBE = { 1: 'romans', 2: 'teutons', 3: 'gauls', 6: 'egyptians', 7: 'huns', 8: 'spartans', 9: 'vikings' };
+
+    // ── solver ──
     function getSolver() { return (typeof solver !== 'undefined') ? solver : (window.solver || null); }
     function refreshSolverStatus() {
-      var s = getSolver();
-      $('solverStatus').innerHTML = s
+      $('solverStatus').innerHTML = getSolver()
         ? 'Exact ILP solver loaded (jsLPSolver) — exact when tractable, else greedy.'
-        : '<span class="err">ILP solver not loaded (offline?) — using greedy heuristic (near-optimal).</span>';
+        : '<span class="err">ILP solver not loaded (offline?) — using greedy (near-optimal).</span>';
     }
 
-    // ── load / validate data ──
+    // ── page parsers (verified vs saved T4.6 DOM) ──
+    function parseVillages(doc) {
+      var vs = [];
+      doc.querySelectorAll('#sidebarBoxVillageList .listEntry.village').forEach(function (eel) {
+        var did = eel.getAttribute('data-did'); if (!did) return;
+        var nameEl = eel.querySelector('.name');
+        var cg = eel.querySelector('.coordinatesGrid');
+        var x = numC((cg && cg.querySelector('.coordinateX') || {}).textContent);
+        var y = numC((cg && cg.querySelector('.coordinateY') || {}).textContent);
+        if (isNaN(x) || isNaN(y)) return;
+        vs.push({ did: Number(did), name: (nameEl ? clean(nameEl.textContent) : 'v' + did) || ('v' + did), x: x, y: y, troops: {} });
+      });
+      return vs;
+    }
+    function parseFarmLists(doc) {
+      var lists = [];
+      doc.querySelectorAll('.farmListWrapper').forEach(function (w) {
+        var le = w.querySelector('.farmListHeader [data-list]');
+        var listId = le ? Number(le.getAttribute('data-list')) : null;
+        var name = clean((w.querySelector('.farmListName .name') || {}).textContent) || ('list' + (listId || ''));
+        var targets = [];
+        w.querySelectorAll('tbody tr.slot').forEach(function (tr) {
+          var a = tr.querySelector('td.target a[href*="karte.php?x="]'); if (!a) return;
+          var m = (a.getAttribute('href') || '').replace(U_MINUS, '-').match(/x=(-?\d+)&(?:amp;)?y=(-?\d+)/);
+          if (m) targets.push({ x: Number(m[1]), y: Number(m[2]) });
+        });
+        lists.push({ listId: listId, name: name, villageDid: null, targets: targets });
+      });
+      return lists;
+    }
+    // Troop icons carry `tN` in their class (e.g. `unit_small tribe6 t4` -> slot t4), paired with a
+    // `.value` count. We look for per-village blocks (an ancestor carrying data-did) on the troops
+    // overview. Best-effort across patches; the editable village table is the guaranteed fallback.
+    function troopsFromEl(rootEl) {
+      var t = {};
+      rootEl.querySelectorAll('i[class*="unit"], [class*="unit_"]').forEach(function (ic) {
+        var cls = ic.getAttribute('class') || ''; // not .className (SVG gives an object)
+        var m = cls.match(/\bt(\d{1,2})\b/); if (!m) return;
+        var slot = parseInt(m[1], 10); if (slot < 1 || slot > 10) return;
+        var wrap = ic.closest('td,span,div,li') || ic.parentElement;
+        var valEl = wrap && (wrap.querySelector('.value') || wrap.nextElementSibling);
+        var n = numC(valEl ? valEl.textContent : (wrap && wrap.textContent));
+        if (!isNaN(n)) t['t' + slot] = Math.max(t['t' + slot] || 0, n);
+      });
+      return t;
+    }
+    function parseTroops(doc) {
+      var byDid = {}, byName = {};
+      doc.querySelectorAll('[data-did]').forEach(function (eel) {
+        var did = eel.getAttribute('data-did');
+        var t = troopsFromEl(eel);
+        if (Object.keys(t).length) byDid[did] = Object.assign(byDid[did] || {}, t);
+      });
+      return { byDid: byDid, byName: byName };
+    }
+    function detectTribe(doc) {
+      var hay = (doc.body ? (doc.body.getAttribute('class') || '') : '') + ' ' + (doc.documentElement ? (doc.documentElement.getAttribute('class') || '') : '');
+      var m = hay.match(/tribe(\d+)/);
+      if (!m) { var te = doc.querySelector('[class*="tribe"]'); if (te) m = (te.getAttribute('class') || '').match(/tribe(\d+)/); }
+      return (m && GAME_TRIBE[m[1]]) || null;
+    }
+
+    // ── merges ──
+    function mergePage(html) {
+      var doc; try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { status('Could not parse page HTML.', true); return; }
+      var found = [];
+      var vs = parseVillages(doc);
+      if (vs.length) {
+        var oldT = {}; STATE.data.villages.forEach(function (v) { oldT[v.did] = v.troops || {}; });
+        vs.forEach(function (v) { v.troops = oldT[v.did] || {}; });
+        STATE.data.villages = vs; found.push(vs.length + ' villages');
+      }
+      var fl = parseFarmLists(doc);
+      if (fl.length) { STATE.data.farmLists = fl; found.push(fl.length + ' farm lists/' + fl.reduce(function (s, l) { return s + l.targets.length; }, 0) + ' targets'); }
+      var tr = parseTroops(doc), applied = 0;
+      STATE.data.villages.forEach(function (v) {
+        var t = tr.byDid[v.did] || tr.byName[v.name];
+        if (t && Object.keys(t).length) { v.troops = Object.assign(v.troops || {}, t); applied++; }
+      });
+      if (applied) found.push('troops on ' + applied + ' villages');
+      var tribe = detectTribe(doc); if (tribe) STATE.data.tribe = tribe;
+      applyData(found.length ? ('Page received: ' + found.join(', ') + '.') : 'Page received, but no villages / farm-lists / troops recognised in it (right page? farm lists expanded?).', !found.length);
+    }
+    function mergeOases(p) {
+      if (!Array.isArray(p.oases)) return;
+      STATE.data.oases = p.oases.filter(function (o) { return o && isFinite(Number(o.x)) && isFinite(Number(o.y)); })
+        .map(function (o) { return { x: Number(o.x), y: Number(o.y), bonuses: Array.isArray(o.bonuses) ? o.bonuses.filter(function (b) { return b && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct)); }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; }) : [] }; });
+      if (p.server) STATE.data.server = p.server;
+      if (p.mapRadius) STATE.data.mapRadius = Number(p.mapRadius) || STATE.data.mapRadius;
+      applyData('Oases received: ' + STATE.data.oases.length + '.');
+    }
+    // full data object (JSON import / sample)
     function loadData(obj) {
-      if (!obj || !Array.isArray(obj.villages) || !Array.isArray(obj.oases)) {
-        $('dataStatus').innerHTML = '<span class="err">Invalid data: need {villages:[], oases:[], …}.</span>';
-        return;
-      }
-      var tribe = String(obj.tribe || 'huns').toLowerCase();
-      if (!UNITS[tribe]) {
-        $('dataStatus').innerHTML = '<span class="err">Unknown tribe "' + esc(obj.tribe) + '".</span>';
-        return;
-      }
-      // normalize / validate (data may arrive from an untrusted postMessage)
-      var dropV = 0, dropO = 0, villages = [], oases = [];
+      if (!obj || !Array.isArray(obj.villages) || !Array.isArray(obj.oases)) { status('Invalid data: need {villages:[], oases:[], …}.', true); return; }
+      STATE.data = blank();
+      STATE.data.server = obj.server || ''; STATE.data.tribe = String(obj.tribe || 'huns').toLowerCase(); STATE.data.mapRadius = Number(obj.mapRadius) || 200;
       obj.villages.forEach(function (v) {
-        if (!v || v.did == null || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) { dropV++; return; }
-        var troops = {};
-        if (v.troops) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = Number(v.troops[k]) || 0; });
-        villages.push({ did: v.did, name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
+        if (!v || v.did == null || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) return;
+        var troops = {}; if (v.troops) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = Number(v.troops[k]) || 0; });
+        STATE.data.villages.push({ did: v.did, name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
       });
-      obj.oases.forEach(function (o) {
-        if (!o || !isFinite(Number(o.x)) || !isFinite(Number(o.y))) { dropO++; return; }
-        var bonuses = (Array.isArray(o.bonuses) ? o.bonuses : []).filter(function (b) {
-          return b && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct));
-        }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; });
-        oases.push({ x: Number(o.x), y: Number(o.y), bonuses: bonuses });
-      });
-      var farmLists = Array.isArray(obj.farmLists) ? obj.farmLists : [];
-      STATE.data = { server: obj.server, tribe: tribe, mapRadius: Number(obj.mapRadius) || 200,
-                     scannedAt: obj.scannedAt, villages: villages, oases: oases, farmLists: farmLists };
-      STATE.tribe = tribe; STATE.units = UNITS[tribe];
-      $('dataStatus').innerHTML = 'Loaded: <b>' + villages.length + '</b> villages, <b>' + oases.length +
-        '</b> oases, <b>' + farmLists.length + '</b> farm lists' +
-        (obj.server ? ' · ' + esc(obj.server) : '') + (obj.scannedAt ? ' · scanned ' + esc(obj.scannedAt) : '') +
-        ((dropV || dropO) ? ' <span class="err">(' + dropV + ' bad villages, ' + dropO + ' bad oases dropped)</span>' : '') + '.';
-      $('tribeName').textContent = (TRIBES.find(function (t) { return t.id === tribe; }) || {}).name || tribe;
-      renderCav(); renderRes(); renderVillages();
-      ['secCfg', 'secVil', 'secRun'].forEach(function (s) { $(s).classList.remove('hidden'); });
-      $('secRes').classList.add('hidden');
+      mergeOases({ oases: obj.oases }); // also runs applyData
+      STATE.data.farmLists = Array.isArray(obj.farmLists) ? obj.farmLists : [];
+      applyData('Imported ' + STATE.data.villages.length + ' villages, ' + STATE.data.oases.length + ' oases, ' + STATE.data.farmLists.length + ' farm lists.');
     }
 
-    // ── cavalry selection (max 3) ──
+    // ── apply state to the UI ──
+    function status(msg, isErr) { $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span>') + esc(msg) + '</span>'; }
+    function statusLine() {
+      var d = STATE.data;
+      var withT = d.villages.filter(function (v) { return v.troops && Object.keys(v.troops).some(function (k) { return v.troops[k] > 0; }); }).length;
+      var tt = (d.farmLists || []).reduce(function (s, l) { return s + l.targets.length; }, 0);
+      return 'villages ' + d.villages.length + ' (troops on ' + withT + ') · oases ' + d.oases.length + ' · farm lists ' + d.farmLists.length + ' (' + tt + ' targets)';
+    }
+    function applyData(msg, isErr) {
+      var tribe = (STATE.data.tribe || 'huns').toLowerCase();
+      if (!UNITS[tribe]) tribe = 'huns';
+      STATE.data.tribe = tribe; STATE.units = UNITS[tribe];
+      persist();
+      if (!STATE.controls) { renderTribeSel(); renderRes(); }
+      $('tribeSel').value = tribe;
+      $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>';
+      if (STATE.data.villages.length) {
+        if (!STATE.controls) { renderCav(); STATE.controls = true; }
+        renderVillages();
+        ['secCfg', 'secVil', 'secRun'].forEach(function (s) { $(s).classList.remove('hidden'); });
+      }
+    }
+
+    // ── tribe / cavalry / resource controls ──
+    function renderTribeSel() {
+      var sel = $('tribeSel'); sel.innerHTML = '';
+      TRIBES.forEach(function (t) { var o = document.createElement('option'); o.value = t.id; o.textContent = t.name; sel.appendChild(o); });
+      sel.addEventListener('change', function () { STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; renderCav(); STATE.controls = true; renderVillages(); persist(); });
+    }
     function renderCav() {
       var row = $('cavRow'); row.innerHTML = '';
-      var list = cav(STATE.tribe);
-      // auto-select up to 3 cavalry that have any troops across villages
+      var list = cav(STATE.data.tribe);
       var hasTroops = {};
-      STATE.data.villages.forEach(function (v) {
-        list.forEach(function (u) { if (v.troops && v.troops[u.slot]) hasTroops[u.slot] = true; });
-      });
+      STATE.data.villages.forEach(function (v) { list.forEach(function (u) { if (v.troops && v.troops[u.slot]) hasTroops[u.slot] = true; }); });
       var auto = list.filter(function (u) { return hasTroops[u.slot]; }).slice(0, 3).map(function (u) { return u.slot; });
+      if (!auto.length) auto = list.slice(0, 3).map(function (u) { return u.slot; }); // sensible default if no counts yet
       list.forEach(function (u) {
         var on = auto.indexOf(u.slot) >= 0;
         var lab = el('label', { class: 'chk' + (on ? ' on' : ''), 'data-slot': u.slot });
-        lab.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + '> ' + u.name +
-          ' <span class="muted">' + u.speed + 'f/h·' + u.cap + 'c</span>';
+        lab.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + '> ' + esc(u.name) + ' <span class="muted">' + u.speed + 'f/h·' + u.cap + 'c</span>';
         lab.querySelector('input').addEventListener('change', function (ev) { onCavToggle(ev, lab); });
         row.appendChild(lab);
       });
     }
-    function selectedSlots() {
-      return Array.prototype.map.call($('cavRow').querySelectorAll('label'), function (l) {
-        return l.querySelector('input').checked ? l.getAttribute('data-slot') : null;
-      }).filter(Boolean);
-    }
+    function selectedSlots() { return Array.prototype.map.call($('cavRow').querySelectorAll('label'), function (l) { return l.querySelector('input').checked ? l.getAttribute('data-slot') : null; }).filter(Boolean); }
     function onCavToggle(ev, lab) {
       if (selectedSlots().length > 3) { ev.target.checked = false; alert('Pick at most 3 cavalry types.'); return; }
-      lab.classList.toggle('on', ev.target.checked);
-      renderVillages(); // budgets depend on selection
+      lab.classList.toggle('on', ev.target.checked); renderVillages();
     }
-
-    // ── resource filter ──
     function renderRes() {
       var row = $('resRow'); row.innerHTML = '';
       PVE.RES.forEach(function (r) {
@@ -244,47 +310,29 @@
         row.appendChild(lab);
       });
     }
-    function resourceFilter() {
-      var f = {};
-      Array.prototype.forEach.call($('resRow').querySelectorAll('label'), function (l) {
-        f[l.getAttribute('data-res')] = l.querySelector('input').checked;
-      });
-      return f;
-    }
+    function resourceFilter() { var f = {}; Array.prototype.forEach.call($('resRow').querySelectorAll('label'), function (l) { f[l.getAttribute('data-res')] = l.querySelector('input').checked; }); return f; }
 
-    // ── per-village table ──
-    function snapshotVillages() {
-      var snap = {};
-      Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
-        snap[tr.getAttribute('data-did')] = {
-          inc: tr.querySelector('.vinc').checked, ts: tr.querySelector('.vts').value,
-          int: tr.querySelector('.vint').value, art: tr.querySelector('.vart').value
-        };
-      });
-      return snap;
-    }
+    // ── per-village table (editable troop counts) ──
+    function villageByDid(did) { for (var i = 0; i < STATE.data.villages.length; i++) if (STATE.data.villages[i].did == did) return STATE.data.villages[i]; return null; }
+    function budgetOf(v, sel) { var c = sel.map(function (s) { return (v.troops && v.troops[s]) || 0; }); return c.length ? Math.min.apply(null, c) : 0; }
+    function snapshotCfg() { var snap = {}; Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) { snap[tr.getAttribute('data-did')] = { inc: tr.querySelector('.vinc').checked, ts: tr.querySelector('.vts').value, int: tr.querySelector('.vint').value, art: tr.querySelector('.vart').value }; }); return snap; }
     function renderVillages() {
-      var sel = selectedSlots();
-      var list = cav(STATE.tribe);
-      var tbl = $('vilTable');
-      var snap = snapshotVillages();            // preserve per-village inputs across re-render
+      var sel = selectedSlots(), list = cav(STATE.data.tribe), tbl = $('vilTable'), snap = snapshotCfg();
       var head = '<tr><th>Use</th><th>Village</th><th>Coords</th>';
       list.forEach(function (u) { head += '<th>' + esc(u.name.split(' ')[0]) + '</th>'; });
       head += '<th>Budget</th><th>TS</th><th>Interval</th><th>Artefact</th></tr>';
       var body = '';
       STATE.data.villages.forEach(function (v) {
         var s = snap[v.did] || {};
-        var counts = sel.map(function (sl) { return (v.troops && v.troops[sl]) || 0; });
-        var budget = counts.length ? Math.min.apply(null, counts) : 0;
         body += '<tr data-did="' + esc(v.did) + '">';
         body += '<td><input type="checkbox" class="vinc" ' + (s.inc === false ? '' : 'checked') + '></td>';
         body += '<td>' + esc(v.name || v.did) + '</td><td>' + mapLink(v.x, v.y) + '</td>';
         list.forEach(function (u) {
           var c = (v.troops && v.troops[u.slot]) || 0;
           var on = sel.indexOf(u.slot) >= 0;
-          body += '<td' + (on ? ' style="color:#f5f0e8"' : ' class="muted"') + '>' + c + '</td>';
+          body += '<td><input type="number" class="vtr" data-slot="' + u.slot + '" value="' + esc(c) + '" min="0" style="width:62px' + (on ? '' : ';color:#78716c') + '"></td>';
         });
-        body += '<td><b>' + budget + '</b></td>';
+        body += '<td class="vbud"><b>' + budgetOf(v, sel) + '</b></td>';
         body += '<td><input type="number" class="vts" value="' + esc(s.ts != null ? s.ts : 0) + '" min="0" max="20"></td>';
         body += '<td><input type="number" class="vint" value="' + esc(s.int != null ? s.int : 5) + '" min="1"></td>';
         body += '<td><input type="number" class="vart" value="' + esc(s.art != null ? s.art : 1) + '" min="0.1" step="0.1"></td>';
@@ -292,45 +340,42 @@
       });
       tbl.innerHTML = head + body;
     }
+    // edit a troop count -> update state + recompute that row's budget
+    $('vilTable') && document.addEventListener('input', function (ev) {
+      var t = ev.target; if (!t.classList || !t.classList.contains('vtr')) return;
+      var tr = t.closest('tr[data-did]'); if (!tr) return;
+      var v = villageByDid(tr.getAttribute('data-did')); if (!v) return;
+      v.troops = v.troops || {}; v.troops[t.getAttribute('data-slot')] = Number(t.value) || 0;
+      var bud = tr.querySelector('.vbud'); if (bud) bud.innerHTML = '<b>' + budgetOf(v, selectedSlots()) + '</b>';
+      persist();
+    });
 
-    function applyAll() {
-      var ts = $('gTs').value, it = $('gInt').value, ar = $('gArt').value;
-      Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
-        tr.querySelector('.vts').value = ts; tr.querySelector('.vint').value = it; tr.querySelector('.vart').value = ar;
-      });
-    }
-
+    function applyAll() { var ts = $('gTs').value, it = $('gInt').value, ar = $('gArt').value; Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) { tr.querySelector('.vts').value = ts; tr.querySelector('.vint').value = it; tr.querySelector('.vart').value = ar; }); }
     function gatherCfg() {
       var perVillage = {}, included = [];
       Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
         var did = Number(tr.getAttribute('data-did'));
         if (tr.querySelector('.vinc').checked) included.push(did);
-        var ts = Number(tr.querySelector('.vts').value);
-        var iv = Number(tr.querySelector('.vint').value);
-        var ar = Number(tr.querySelector('.vart').value);
-        perVillage[did] = {
-          ts: (isFinite(ts) && ts >= 0) ? ts : 0,
-          interval: (isFinite(iv) && iv > 0) ? iv : 5,
-          artefact: (isFinite(ar) && ar > 0) ? ar : 1   // explicit check: a typed 0 must not become 1
-        };
+        var ts = Number(tr.querySelector('.vts').value), iv = Number(tr.querySelector('.vint').value), ar = Number(tr.querySelector('.vart').value);
+        perVillage[did] = { ts: (isFinite(ts) && ts >= 0) ? ts : 0, interval: (isFinite(iv) && iv > 0) ? iv : 5, artefact: (isFinite(ar) && ar > 0) ? ar : 1 };
       });
-      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included,
-               resourceFilter: resourceFilter(), perVillage: perVillage };
+      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage };
     }
 
     // ── run ──
     function runOptimize() {
+      if (!STATE.data.oases.length) { alert('No oases yet — run "Scan oases" in the collector and Send.'); return; }
       var cfg = gatherCfg();
       if (!cfg.selectedSlots.length) { alert('Select at least one cavalry type.'); return; }
       if (!cfg.includedDids.length) { alert('Include at least one village.'); return; }
       var inst = PVE.buildInstance(STATE.data, cfg);
+      if (!inst.villages.some(function (v) { return v.budget > 0; })) { alert('Every selected village has budget 0 — type cavalry counts in the table (or send a troops page).'); return; }
       var result = PVE.solve(inst, { solver: getSolver(), maxExactPairs: 1500 });
       var rows = PVE.planDiff(STATE.data, inst, result);
       renderResults(inst, result, rows);
       $('secRes').classList.remove('hidden');
       $('secRes').scrollIntoView({ behavior: 'smooth' });
     }
-
     function renderResults(inst, result, rows) {
       var over = result.movements > 20000;
       var cards = [
@@ -338,82 +383,55 @@
         { k: 'Outgoing movements', v: result.movements.toLocaleString(), warn: over },
         { k: 'Villages used', v: inst.villages.filter(function (_, i) { return result.used[i] > 0; }).length + ' / ' + inst.villages.length }
       ];
-      $('cards').innerHTML = cards.map(function (c) {
-        return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>';
-      }).join('') + (over ? '<div class="card warn"><div class="v">⚠</div><div class="k">over 20,000 movement cap</div></div>' : '');
-
-      $('methodLine').innerHTML = 'Method: <b>' + esc(result.method) + '</b>. Per-village rainbows used: ' +
-        inst.villages.map(function (v, i) { return esc(v.name) + ' ' + result.used[i] + '/' + v.budget; }).join(' · ');
-
+      $('cards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('') + (over ? '<div class="card warn"><div class="v">⚠</div><div class="k">over 20,000 movement cap</div></div>' : '');
+      $('methodLine').innerHTML = 'Method: <b>' + esc(result.method) + '</b>. Per-village rainbows used: ' + inst.villages.map(function (v, i) { return esc(v.name) + ' ' + result.used[i] + '/' + v.budget; }).join(' · ');
       var counts = { add: 0, move: 0, keep: 0, remove: 0 };
       rows.forEach(function (r) { counts[r.status]++; });
-      $('diffFilters').innerHTML = ['add', 'move', 'keep', 'remove'].map(function (s) {
-        return '<label class="chk on" data-st="' + s + '"><input type="checkbox" checked> ' +
-          s + ' <span class="muted">' + counts[s] + '</span></label>';
-      }).join('');
-      Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) {
-        l.querySelector('input').addEventListener('change', function (ev) {
-          l.classList.toggle('on', ev.target.checked); drawDiff(rows);
-        });
-      });
+      $('diffFilters').innerHTML = ['add', 'move', 'keep', 'remove'].map(function (s) { return '<label class="chk on" data-st="' + s + '"><input type="checkbox" checked> ' + s + ' <span class="muted">' + counts[s] + '</span></label>'; }).join('');
+      Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) { l.querySelector('input').addEventListener('change', function (ev) { l.classList.toggle('on', ev.target.checked); drawDiff(rows); }); });
       drawDiff(rows);
     }
-
     function drawDiff(rows) {
-      var show = {};
-      Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) {
-        show[l.getAttribute('data-st')] = l.querySelector('input').checked;
-      });
+      var show = {}; Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) { show[l.getAttribute('data-st')] = l.querySelector('input').checked; });
       var order = { add: 0, move: 1, keep: 2, remove: 3 };
-      var visible = rows.filter(function (r) { return show[r.status]; })
-        .sort(function (a, b) { return (order[a.status] - order[b.status]) || (a.toVillage || a.fromVillage || '').localeCompare(b.toVillage || b.fromVillage || ''); });
+      var visible = rows.filter(function (r) { return show[r.status]; }).sort(function (a, b) { return (order[a.status] - order[b.status]) || (a.toVillage || a.fromVillage || '').localeCompare(b.toVillage || b.fromVillage || ''); });
       var head = '<tr><th>Action</th><th>Oasis</th><th>Type</th><th>Village</th><th>Was on</th><th>Note</th></tr>';
-      var body = visible.map(function (r) {
-        var badge = '<span class="badge b-' + r.status + '">' + r.status + '</span>';
-        return '<tr><td>' + badge + '</td><td>' + mapLink(r.x, r.y) + '</td><td>' + typeLabel(r.bonuses) + '</td>' +
-          '<td>' + esc(r.toVillage || '—') + '</td><td>' + esc(r.fromVillage || '—') + '</td><td class="muted">' + esc(r.reason || '') + '</td></tr>';
-      }).join('');
+      var body = visible.map(function (r) { return '<tr><td><span class="badge b-' + r.status + '">' + r.status + '</span></td><td>' + mapLink(r.x, r.y) + '</td><td>' + typeLabel(r.bonuses) + '</td><td>' + esc(r.toVillage || '—') + '</td><td>' + esc(r.fromVillage || '—') + '</td><td class="muted">' + esc(r.reason || '') + '</td></tr>'; }).join('');
       $('diffTable').innerHTML = head + (body || '<tr><td colspan="6" class="muted">No rows for the selected filters.</td></tr>');
     }
 
+    // ── ingest: detect JSON vs HTML, route accordingly ──
+    function ingestText(text) {
+      var s = (text || '').trim();
+      if (!s) return;
+      if (s[0] === '{' || s[0] === '[') { try { loadData(JSON.parse(s)); return; } catch (e) { /* not json, try html */ } }
+      mergePage(s); // treat as a page's HTML
+    }
+
     // ── wire up ──
-    $('btnSample').addEventListener('click', function () {
-      fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData)
-        .catch(function () { $('dataStatus').innerHTML = '<span class="err">Could not fetch sample-data.json (open via a local server, or use Import JSON file).</span>'; });
-    });
     $('btnFile').addEventListener('click', function () { $('fileInput').click(); });
-    $('fileInput').addEventListener('change', function (e) {
-      var f = e.target.files[0]; if (!f) return;
-      var rd = new FileReader();
-      rd.onload = function () { try { loadData(JSON.parse(rd.result)); } catch (err) { $('dataStatus').innerHTML = '<span class="err">Bad JSON: ' + err.message + '</span>'; } };
-      rd.readAsText(f);
-    });
-    $('btnPaste').addEventListener('click', function () {
-      try { loadData(JSON.parse($('pasteBox').value)); } catch (err) { $('dataStatus').innerHTML = '<span class="err">Bad JSON: ' + err.message + '</span>'; }
-    });
+    $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
+    $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
+    $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
+    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; renderTribeSel(); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
 
-    // ── collector hand-off ──
-    function isGameOrigin(origin) {
-      try { return /(^|\.)travian\./i.test(new URL(origin).hostname); } catch (e) { return false; }
-    }
-    // (a) cross-origin: the collector (on the game origin) opens this page and postMessages the data.
-    //     Only accept messages from our opener AND from a travian origin.
+    // ── collector hand-off (postMessage) ──
+    function isGameOrigin(o) { try { return /(^|\.)travian\./i.test(new URL(o).hostname); } catch (e) { return false; } }
     window.addEventListener('message', function (ev) {
-      if (ev.source !== window.opener || !isGameOrigin(ev.origin)) return;
-      var d = ev.data;
-      if (d && typeof d === 'object' && Array.isArray(d.villages) && Array.isArray(d.oases)) loadData(d);
+      if (!isGameOrigin(ev.origin) && ev.origin !== location.origin) return; // collector (travian) or same-origin (tests)
+      var d = ev.data; if (!d || typeof d !== 'object') return;
+      if (d.pve === 'oases') mergeOases(d);
+      else if (d.pve === 'page' && typeof d.html === 'string') mergePage(d.html);
+      else if (Array.isArray(d.villages) && Array.isArray(d.oases)) loadData(d); // legacy full payload
     });
     try { if (window.opener) window.opener.postMessage('pve-ready', '*'); } catch (e) { /* ignore */ }
-    // (b) same-origin fallback: only when this page is itself served from the game origin.
-    try {
-      if (/(^|\.)travian\./i.test(location.hostname)) {
-        var handoff = localStorage.getItem('pveOptimizerData');
-        if (handoff) { localStorage.removeItem('pveOptimizerData'); loadData(JSON.parse(handoff)); }
-      }
-    } catch (e) { /* ignore */ }
 
+    // ── boot ──
+    restore();
+    renderTribeSel(); renderRes();
+    if (STATE.data.villages.length || STATE.data.oases.length) applyData('Restored your last session.'); else status('Waiting for data… (Scan oases + Send page from the collector, or Import a file.)');
     refreshSolverStatus();
     window.addEventListener('load', refreshSolverStatus);
   })();

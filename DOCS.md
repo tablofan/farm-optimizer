@@ -9,14 +9,23 @@ for the build plan / data contract.
 
 ## Two parts
 
-1. **Collector** (`collector.user.js`) — a Tampermonkey userscript that runs on the gameworld and
-   scrapes, read-only: all **free oases** (coords + bonus type) via `POST /api/v1/map/position`, your
-   **villages** (coords) + home **cavalry** counts, and your **current farm lists**. Hands the data to
-   the calculator via Download / Copy / auto-`postMessage`. Never writes to the game.
-2. **Calculator** (`index.html`) — a static page. Import the collector's JSON, pick ≤3 cavalry types,
-   set per-village TS / sending-interval / speed-artefact, filter by resource, and Optimise. Shows a
+1. **Collector** (`collector.user.js`) — a Tampermonkey userscript on the gameworld, read-only, with
+   two jobs: **Scan oases** (sweep `POST /api/v1/map/position` — the only way to enumerate the whole
+   map's free oases) and **Send page** (`postMessage` the current rendered HTML to the calculator).
+   It does *no* parsing — the page HTML carries villages / farm-lists / troops, and the calculator
+   parses it. (Parsing lives in the calculator so selectors can be fixed by redeploying the page,
+   with no userscript reinstall.) Never writes to the game.
+2. **Calculator** (`index.html`) — a static page that **accumulates** sent data (oases + each sent
+   page) and **persists** it in localStorage. It parses villages / farm-lists / troops from sent
+   pages, lets you pick ≤3 cavalry types, set per-village TS / interval / artefact, **edit troop
+   counts** (fallback when a troops page isn't sent), filter by resource, and Optimise. Shows a
    **display-only plan diff** (keep / add / move / remove) versus your current farm lists, each oasis
-   linking to the in-game map.
+   linking to the in-game map. Also accepts a saved page (`.htm`) or JSON via Import.
+
+   *Why send the page, not the map?* Villages/farm-lists/troops all live on one rendered page each
+   (Send page captures them). The **map** doesn't: it renders as raster image tiles with no per-tile
+   data, and only the visible viewport is ever loaded — so all free oases can only come from the API
+   sweep. Expand the farm lists you want before sending (collapsed lists don't render their rows).
 
 ## Files
 
