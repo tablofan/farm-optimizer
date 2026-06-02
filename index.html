@@ -6,57 +6,417 @@
   <title>PvE Optimizer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #1c1917;
-      color: #e0e0e0;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      padding: 24px 16px;
+      background: #1c1917; color: #e0e0e0; min-height: 100vh;
+      display: flex; justify-content: center; padding: 24px 16px;
     }
-
     .container { max-width: 1400px; width: 100%; }
-
-    h1 {
-      text-align: center;
-      color: #f5f0e8;
-      font-size: 1.6rem;
-      margin-bottom: 24px;
-    }
-
-    .section {
-      background: #292524;
-      border: 1px solid #44403c;
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 16px;
-    }
-
-    .section-title {
-      font-size: 0.85rem;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #d6d3d1;
-      margin-bottom: 14px;
-    }
-
+    h1 { text-align: center; color: #f5f0e8; font-size: 1.6rem; margin-bottom: 6px; }
+    .sub { text-align: center; color: #78716c; font-size: .8rem; margin-bottom: 20px; }
+    .section { background: #292524; border: 1px solid #44403c; border-radius: 8px; padding: 18px 20px; margin-bottom: 16px; }
+    .section-title { font-size: .8rem; text-transform: uppercase; letter-spacing: 1px; color: #d6d3d1; margin-bottom: 14px; }
     p { color: #a8a29e; line-height: 1.5; }
-
-    .label-lumber { color: #a67c52; }
-    .label-clay { color: #c4703f; }
-    .label-iron { color: #9a9ab0; }
-    .label-crop { color: #b8a078; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .row + .row { margin-top: 10px; }
+    button {
+      background: #44403c; color: #f5f0e8; border: 1px solid #57534e; border-radius: 6px;
+      padding: 8px 14px; cursor: pointer; font-size: .85rem;
+    }
+    button:hover { background: #57534e; }
+    button.primary { background: #6b5d3f; border-color: #8a7a52; font-weight: 600; }
+    button.primary:hover { background: #8a7a52; }
+    textarea {
+      width: 100%; min-height: 90px; background: #1c1917; color: #e0e0e0;
+      border: 1px solid #44403c; border-radius: 6px; padding: 8px; font-family: monospace; font-size: .8rem;
+    }
+    input[type=number] { width: 70px; background: #1c1917; color: #e0e0e0; border: 1px solid #44403c; border-radius: 4px; padding: 4px 6px; }
+    label.chk { display: inline-flex; align-items: center; gap: 6px; background: #1c1917; border: 1px solid #44403c; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: .85rem; }
+    label.chk.on { border-color: #8a7a52; background: #34302b; }
+    .muted { color: #78716c; font-size: .8rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #3a3531; white-space: nowrap; }
+    th { color: #d6d3d1; font-weight: 600; position: sticky; top: 0; background: #292524; }
+    .scroll { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+    a { color: #c9a86a; }
+    .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+    .card { background: #1c1917; border: 1px solid #44403c; border-radius: 8px; padding: 12px 16px; min-width: 150px; }
+    .card .v { font-size: 1.5rem; color: #f5f0e8; }
+    .card .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .5px; color: #78716c; }
+    .card.warn .v { color: #e08a5a; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .72rem; font-weight: 600; }
+    .b-add { background: #2f4a2f; color: #9fd39f; }
+    .b-keep { background: #33302b; color: #b8a078; }
+    .b-move { background: #3a3a52; color: #b0b0e0; }
+    .b-remove { background: #4a2f2f; color: #e0a0a0; }
+    .label-wood { color: #a67c52; } .label-clay { color: #c4703f; }
+    .label-iron { color: #9a9ab0; } .label-crop { color: #b8a078; }
+    .status { font-size: .8rem; color: #a8a29e; margin-top: 8px; }
+    .err { color: #e08a5a; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>PvE Optimizer</h1>
+    <div class="sub">Oasis farming — Travian (x3, T4.6) · maximise oases farmed across your villages</div>
+
+    <!-- 1. Data -->
     <div class="section">
-      <div class="section-title">Oasis Farming — Travian (x3, T4.6)</div>
-      <p>Optimize which oases to send troops on. Scaffold ready — build out the parser, calculation, and tabs here.</p>
+      <div class="section-title">1 · Data</div>
+      <div class="row">
+        <button id="btnSample">Load sample data</button>
+        <button id="btnFile">Import JSON file…</button>
+        <input type="file" id="fileInput" accept=".json,application/json" class="hidden">
+        <span class="muted">…or paste the collector's JSON below.</span>
+      </div>
+      <div class="row"><textarea id="pasteBox" placeholder='{"tribe":"huns","mapRadius":200,"villages":[...],"oases":[...],"farmLists":[...]}'></textarea></div>
+      <div class="row"><button id="btnPaste">Load pasted JSON</button></div>
+      <div class="status" id="dataStatus">No data loaded.</div>
+    </div>
+
+    <!-- 2. Cavalry & filters -->
+    <div class="section hidden" id="secCfg">
+      <div class="section-title">2 · Cavalry &amp; filters</div>
+      <p class="muted" style="margin-bottom:8px">Tribe: <b id="tribeName">—</b>. Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed.</p>
+      <div class="row" id="cavRow"></div>
+      <p class="muted" style="margin:12px 0 8px">Farm only these oasis resource types (double oases bucket by their primary/non-crop bonus):</p>
+      <div class="row" id="resRow"></div>
+      <div class="row" style="margin-top:14px">
+        <span class="muted">Apply to all villages:</span>
+        TS <input type="number" id="gTs" value="0" min="0" max="20">
+        Interval (min) <input type="number" id="gInt" value="5" min="1" step="1">
+        Artefact × <input type="number" id="gArt" value="1" min="0.1" step="0.1">
+        <button id="btnApplyAll">Apply</button>
+      </div>
+    </div>
+
+    <!-- 3. Villages -->
+    <div class="section hidden" id="secVil">
+      <div class="section-title">3 · Villages</div>
+      <div class="scroll"><table id="vilTable"></table></div>
+    </div>
+
+    <!-- Optimize -->
+    <div class="section hidden" id="secRun">
+      <div class="row">
+        <button class="primary" id="btnRun">Optimise ▶</button>
+        <span class="status" id="solverStatus"></span>
+      </div>
+    </div>
+
+    <!-- 4. Results -->
+    <div class="section hidden" id="secRes">
+      <div class="section-title">4 · Plan</div>
+      <div class="cards" id="cards"></div>
+      <div class="status" id="methodLine"></div>
+      <div class="row" id="diffFilters" style="margin:10px 0"></div>
+      <div class="scroll"><table id="diffTable"></table></div>
     </div>
   </div>
+
+  <script src="cavalry.js"></script>
+  <script src="optimizer.js"></script>
+  <!-- exact ILP solver (pure JS, no build). Falls back to greedy if unavailable. -->
+  <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"
+          onerror="window.__solverFailed=true"></script>
+  <script>
+  (function () {
+    'use strict';
+    var STATE = { data: null, units: null, tribe: null };
+
+    var $ = function (id) { return document.getElementById(id); };
+    function el(tag, attrs, html) {
+      var e = document.createElement(tag);
+      if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+      if (html != null) e.innerHTML = html;
+      return e;
+    }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function serverBase() {
+      var s = ((STATE.data && STATE.data.server) || '').replace(/\/+$/, '');
+      return /^https?:\/\//i.test(s) ? s : ''; // only trust http(s) origins
+    }
+    function mapLink(x, y) {
+      var nx = Number(x), ny = Number(y);
+      if (!isFinite(nx) || !isFinite(ny)) return esc(x + '|' + y);
+      var href = serverBase() + '/karte.php?x=' + nx + '&y=' + ny;
+      return '<a href="' + esc(href) + '" target="_blank" rel="noopener">' + nx + '|' + ny + '</a>';
+    }
+    function resClass(r) { return 'label-' + esc(r); }
+    function typeLabel(bonuses) {
+      return (bonuses || []).map(function (b) {
+        return '<span class="' + resClass(b.res) + '">+' + Number(b.pct) + '% ' + esc(b.res) + '</span>';
+      }).join(', ');
+    }
+    function cav(tribe) { return (UNITS[tribe] || []).filter(function (u) { return u.type === 'c'; }); }
+
+    // ── solver availability ──
+    function getSolver() { return (typeof solver !== 'undefined') ? solver : (window.solver || null); }
+    function refreshSolverStatus() {
+      var s = getSolver();
+      $('solverStatus').innerHTML = s
+        ? 'Exact ILP solver loaded (jsLPSolver) — exact when tractable, else greedy.'
+        : '<span class="err">ILP solver not loaded (offline?) — using greedy heuristic (near-optimal).</span>';
+    }
+
+    // ── load / validate data ──
+    function loadData(obj) {
+      if (!obj || !Array.isArray(obj.villages) || !Array.isArray(obj.oases)) {
+        $('dataStatus').innerHTML = '<span class="err">Invalid data: need {villages:[], oases:[], …}.</span>';
+        return;
+      }
+      var tribe = String(obj.tribe || 'huns').toLowerCase();
+      if (!UNITS[tribe]) {
+        $('dataStatus').innerHTML = '<span class="err">Unknown tribe "' + esc(obj.tribe) + '".</span>';
+        return;
+      }
+      // normalize / validate (data may arrive from an untrusted postMessage)
+      var dropV = 0, dropO = 0, villages = [], oases = [];
+      obj.villages.forEach(function (v) {
+        if (!v || v.did == null || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) { dropV++; return; }
+        var troops = {};
+        if (v.troops) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = Number(v.troops[k]) || 0; });
+        villages.push({ did: v.did, name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
+      });
+      obj.oases.forEach(function (o) {
+        if (!o || !isFinite(Number(o.x)) || !isFinite(Number(o.y))) { dropO++; return; }
+        var bonuses = (Array.isArray(o.bonuses) ? o.bonuses : []).filter(function (b) {
+          return b && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct));
+        }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; });
+        oases.push({ x: Number(o.x), y: Number(o.y), bonuses: bonuses });
+      });
+      var farmLists = Array.isArray(obj.farmLists) ? obj.farmLists : [];
+      STATE.data = { server: obj.server, tribe: tribe, mapRadius: Number(obj.mapRadius) || 200,
+                     scannedAt: obj.scannedAt, villages: villages, oases: oases, farmLists: farmLists };
+      STATE.tribe = tribe; STATE.units = UNITS[tribe];
+      $('dataStatus').innerHTML = 'Loaded: <b>' + villages.length + '</b> villages, <b>' + oases.length +
+        '</b> oases, <b>' + farmLists.length + '</b> farm lists' +
+        (obj.server ? ' · ' + esc(obj.server) : '') + (obj.scannedAt ? ' · scanned ' + esc(obj.scannedAt) : '') +
+        ((dropV || dropO) ? ' <span class="err">(' + dropV + ' bad villages, ' + dropO + ' bad oases dropped)</span>' : '') + '.';
+      $('tribeName').textContent = (TRIBES.find(function (t) { return t.id === tribe; }) || {}).name || tribe;
+      renderCav(); renderRes(); renderVillages();
+      ['secCfg', 'secVil', 'secRun'].forEach(function (s) { $(s).classList.remove('hidden'); });
+      $('secRes').classList.add('hidden');
+    }
+
+    // ── cavalry selection (max 3) ──
+    function renderCav() {
+      var row = $('cavRow'); row.innerHTML = '';
+      var list = cav(STATE.tribe);
+      // auto-select up to 3 cavalry that have any troops across villages
+      var hasTroops = {};
+      STATE.data.villages.forEach(function (v) {
+        list.forEach(function (u) { if (v.troops && v.troops[u.slot]) hasTroops[u.slot] = true; });
+      });
+      var auto = list.filter(function (u) { return hasTroops[u.slot]; }).slice(0, 3).map(function (u) { return u.slot; });
+      list.forEach(function (u) {
+        var on = auto.indexOf(u.slot) >= 0;
+        var lab = el('label', { class: 'chk' + (on ? ' on' : ''), 'data-slot': u.slot });
+        lab.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + '> ' + u.name +
+          ' <span class="muted">' + u.speed + 'f/h·' + u.cap + 'c</span>';
+        lab.querySelector('input').addEventListener('change', function (ev) { onCavToggle(ev, lab); });
+        row.appendChild(lab);
+      });
+    }
+    function selectedSlots() {
+      return Array.prototype.map.call($('cavRow').querySelectorAll('label'), function (l) {
+        return l.querySelector('input').checked ? l.getAttribute('data-slot') : null;
+      }).filter(Boolean);
+    }
+    function onCavToggle(ev, lab) {
+      if (selectedSlots().length > 3) { ev.target.checked = false; alert('Pick at most 3 cavalry types.'); return; }
+      lab.classList.toggle('on', ev.target.checked);
+      renderVillages(); // budgets depend on selection
+    }
+
+    // ── resource filter ──
+    function renderRes() {
+      var row = $('resRow'); row.innerHTML = '';
+      PVE.RES.forEach(function (r) {
+        var lab = el('label', { class: 'chk on', 'data-res': r });
+        lab.innerHTML = '<input type="checkbox" checked> <span class="' + resClass(r) + '">' + r + '</span>';
+        lab.querySelector('input').addEventListener('change', function (ev) { lab.classList.toggle('on', ev.target.checked); });
+        row.appendChild(lab);
+      });
+    }
+    function resourceFilter() {
+      var f = {};
+      Array.prototype.forEach.call($('resRow').querySelectorAll('label'), function (l) {
+        f[l.getAttribute('data-res')] = l.querySelector('input').checked;
+      });
+      return f;
+    }
+
+    // ── per-village table ──
+    function snapshotVillages() {
+      var snap = {};
+      Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
+        snap[tr.getAttribute('data-did')] = {
+          inc: tr.querySelector('.vinc').checked, ts: tr.querySelector('.vts').value,
+          int: tr.querySelector('.vint').value, art: tr.querySelector('.vart').value
+        };
+      });
+      return snap;
+    }
+    function renderVillages() {
+      var sel = selectedSlots();
+      var list = cav(STATE.tribe);
+      var tbl = $('vilTable');
+      var snap = snapshotVillages();            // preserve per-village inputs across re-render
+      var head = '<tr><th>Use</th><th>Village</th><th>Coords</th>';
+      list.forEach(function (u) { head += '<th>' + esc(u.name.split(' ')[0]) + '</th>'; });
+      head += '<th>Budget</th><th>TS</th><th>Interval</th><th>Artefact</th></tr>';
+      var body = '';
+      STATE.data.villages.forEach(function (v) {
+        var s = snap[v.did] || {};
+        var counts = sel.map(function (sl) { return (v.troops && v.troops[sl]) || 0; });
+        var budget = counts.length ? Math.min.apply(null, counts) : 0;
+        body += '<tr data-did="' + esc(v.did) + '">';
+        body += '<td><input type="checkbox" class="vinc" ' + (s.inc === false ? '' : 'checked') + '></td>';
+        body += '<td>' + esc(v.name || v.did) + '</td><td>' + mapLink(v.x, v.y) + '</td>';
+        list.forEach(function (u) {
+          var c = (v.troops && v.troops[u.slot]) || 0;
+          var on = sel.indexOf(u.slot) >= 0;
+          body += '<td' + (on ? ' style="color:#f5f0e8"' : ' class="muted"') + '>' + c + '</td>';
+        });
+        body += '<td><b>' + budget + '</b></td>';
+        body += '<td><input type="number" class="vts" value="' + esc(s.ts != null ? s.ts : 0) + '" min="0" max="20"></td>';
+        body += '<td><input type="number" class="vint" value="' + esc(s.int != null ? s.int : 5) + '" min="1"></td>';
+        body += '<td><input type="number" class="vart" value="' + esc(s.art != null ? s.art : 1) + '" min="0.1" step="0.1"></td>';
+        body += '</tr>';
+      });
+      tbl.innerHTML = head + body;
+    }
+
+    function applyAll() {
+      var ts = $('gTs').value, it = $('gInt').value, ar = $('gArt').value;
+      Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
+        tr.querySelector('.vts').value = ts; tr.querySelector('.vint').value = it; tr.querySelector('.vart').value = ar;
+      });
+    }
+
+    function gatherCfg() {
+      var perVillage = {}, included = [];
+      Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
+        var did = Number(tr.getAttribute('data-did'));
+        if (tr.querySelector('.vinc').checked) included.push(did);
+        var ts = Number(tr.querySelector('.vts').value);
+        var iv = Number(tr.querySelector('.vint').value);
+        var ar = Number(tr.querySelector('.vart').value);
+        perVillage[did] = {
+          ts: (isFinite(ts) && ts >= 0) ? ts : 0,
+          interval: (isFinite(iv) && iv > 0) ? iv : 5,
+          artefact: (isFinite(ar) && ar > 0) ? ar : 1   // explicit check: a typed 0 must not become 1
+        };
+      });
+      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included,
+               resourceFilter: resourceFilter(), perVillage: perVillage };
+    }
+
+    // ── run ──
+    function runOptimize() {
+      var cfg = gatherCfg();
+      if (!cfg.selectedSlots.length) { alert('Select at least one cavalry type.'); return; }
+      if (!cfg.includedDids.length) { alert('Include at least one village.'); return; }
+      var inst = PVE.buildInstance(STATE.data, cfg);
+      var result = PVE.solve(inst, { solver: getSolver(), maxExactPairs: 1500 });
+      var rows = PVE.planDiff(STATE.data, inst, result);
+      renderResults(inst, result, rows);
+      $('secRes').classList.remove('hidden');
+      $('secRes').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function renderResults(inst, result, rows) {
+      var over = result.movements > 20000;
+      var cards = [
+        { k: 'Oases farmed', v: result.count + ' / ' + inst.maxPossible },
+        { k: 'Outgoing movements', v: result.movements.toLocaleString(), warn: over },
+        { k: 'Villages used', v: inst.villages.filter(function (_, i) { return result.used[i] > 0; }).length + ' / ' + inst.villages.length }
+      ];
+      $('cards').innerHTML = cards.map(function (c) {
+        return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>';
+      }).join('') + (over ? '<div class="card warn"><div class="v">⚠</div><div class="k">over 20,000 movement cap</div></div>' : '');
+
+      $('methodLine').innerHTML = 'Method: <b>' + esc(result.method) + '</b>. Per-village rainbows used: ' +
+        inst.villages.map(function (v, i) { return esc(v.name) + ' ' + result.used[i] + '/' + v.budget; }).join(' · ');
+
+      var counts = { add: 0, move: 0, keep: 0, remove: 0 };
+      rows.forEach(function (r) { counts[r.status]++; });
+      $('diffFilters').innerHTML = ['add', 'move', 'keep', 'remove'].map(function (s) {
+        return '<label class="chk on" data-st="' + s + '"><input type="checkbox" checked> ' +
+          s + ' <span class="muted">' + counts[s] + '</span></label>';
+      }).join('');
+      Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) {
+        l.querySelector('input').addEventListener('change', function (ev) {
+          l.classList.toggle('on', ev.target.checked); drawDiff(rows);
+        });
+      });
+      drawDiff(rows);
+    }
+
+    function drawDiff(rows) {
+      var show = {};
+      Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) {
+        show[l.getAttribute('data-st')] = l.querySelector('input').checked;
+      });
+      var order = { add: 0, move: 1, keep: 2, remove: 3 };
+      var visible = rows.filter(function (r) { return show[r.status]; })
+        .sort(function (a, b) { return (order[a.status] - order[b.status]) || (a.toVillage || a.fromVillage || '').localeCompare(b.toVillage || b.fromVillage || ''); });
+      var head = '<tr><th>Action</th><th>Oasis</th><th>Type</th><th>Village</th><th>Was on</th><th>Note</th></tr>';
+      var body = visible.map(function (r) {
+        var badge = '<span class="badge b-' + r.status + '">' + r.status + '</span>';
+        return '<tr><td>' + badge + '</td><td>' + mapLink(r.x, r.y) + '</td><td>' + typeLabel(r.bonuses) + '</td>' +
+          '<td>' + esc(r.toVillage || '—') + '</td><td>' + esc(r.fromVillage || '—') + '</td><td class="muted">' + esc(r.reason || '') + '</td></tr>';
+      }).join('');
+      $('diffTable').innerHTML = head + (body || '<tr><td colspan="6" class="muted">No rows for the selected filters.</td></tr>');
+    }
+
+    // ── wire up ──
+    $('btnSample').addEventListener('click', function () {
+      fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData)
+        .catch(function () { $('dataStatus').innerHTML = '<span class="err">Could not fetch sample-data.json (open via a local server, or use Import JSON file).</span>'; });
+    });
+    $('btnFile').addEventListener('click', function () { $('fileInput').click(); });
+    $('fileInput').addEventListener('change', function (e) {
+      var f = e.target.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () { try { loadData(JSON.parse(rd.result)); } catch (err) { $('dataStatus').innerHTML = '<span class="err">Bad JSON: ' + err.message + '</span>'; } };
+      rd.readAsText(f);
+    });
+    $('btnPaste').addEventListener('click', function () {
+      try { loadData(JSON.parse($('pasteBox').value)); } catch (err) { $('dataStatus').innerHTML = '<span class="err">Bad JSON: ' + err.message + '</span>'; }
+    });
+    $('btnApplyAll').addEventListener('click', applyAll);
+    $('btnRun').addEventListener('click', runOptimize);
+
+    // ── collector hand-off ──
+    function isGameOrigin(origin) {
+      try { return /(^|\.)travian\./i.test(new URL(origin).hostname); } catch (e) { return false; }
+    }
+    // (a) cross-origin: the collector (on the game origin) opens this page and postMessages the data.
+    //     Only accept messages from our opener AND from a travian origin.
+    window.addEventListener('message', function (ev) {
+      if (ev.source !== window.opener || !isGameOrigin(ev.origin)) return;
+      var d = ev.data;
+      if (d && typeof d === 'object' && Array.isArray(d.villages) && Array.isArray(d.oases)) loadData(d);
+    });
+    try { if (window.opener) window.opener.postMessage('pve-ready', '*'); } catch (e) { /* ignore */ }
+    // (b) same-origin fallback: only when this page is itself served from the game origin.
+    try {
+      if (/(^|\.)travian\./i.test(location.hostname)) {
+        var handoff = localStorage.getItem('pveOptimizerData');
+        if (handoff) { localStorage.removeItem('pveOptimizerData'); loadData(JSON.parse(handoff)); }
+      }
+    } catch (e) { /* ignore */ }
+
+    refreshSolverStatus();
+    window.addEventListener('load', refreshSolverStatus);
+  })();
+  </script>
 </body>
 </html>
