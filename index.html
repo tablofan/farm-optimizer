@@ -121,14 +121,26 @@
 
     // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
     var STORE = 'pveData';
-    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, villages: [], oases: [], farmLists: [] }; }
-    var STATE = { data: blank(), units: null, controls: false };
-    function persist() { try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); } catch (e) { /* quota */ } }
-    function restore() { try { var s = localStorage.getItem(STORE); if (s) STATE.data = JSON.parse(s); } catch (e) { STATE.data = blank(); } }
+    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} } }; }
+    var STATE = { data: blank(), units: null, controls: false, quotaWarned: false };
+    function persist() {
+      try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); }
+      catch (e) { if (!STATE.quotaWarned) { STATE.quotaWarned = true; status('Could not save locally (storage full/blocked) — data is still in this tab; avoid reloading.', true); } }
+    }
+    function restore() {
+      try { var s = localStorage.getItem(STORE); if (s) STATE.data = Object.assign(blank(), JSON.parse(s)); } catch (e) { STATE.data = blank(); }
+      var d = STATE.data; // normalise a partial/legacy blob so boot can't crash
+      if (!Array.isArray(d.villages)) d.villages = [];
+      if (!Array.isArray(d.oases)) d.oases = [];
+      if (!Array.isArray(d.farmLists)) d.farmLists = [];
+      if (!d.pendingTroops || typeof d.pendingTroops !== 'object') d.pendingTroops = {};
+      if (!d.pendingTroops.byDid) d.pendingTroops.byDid = {};
+      if (!d.pendingTroops.byName) d.pendingTroops.byName = {};
+    }
 
     // ── text helpers ──
-    var U_MINUS = /−/g, U_MARKS = /[‪-‮⁦-⁩‎‏⁠]/g;
-    function numC(s) { var m = String(s == null ? '' : s).replace(U_MARKS, '').replace(U_MINUS, '-').match(/-?\d[\d.,]*\d|-?\d/); return m ? parseInt(m[0].replace(/[.,]/g, ''), 10) : NaN; }
+    var U_MINUS = /−/g, U_MARKS = /[‪-‮⁦-⁩‎‏⁠]/g, U_DASH = /[‐-―−]/g; // bidi marks + dash family (hyphen..em-dash, U+2212)
+    function numC(s) { var m = String(s == null ? '' : s).replace(U_MARKS, '').replace(U_DASH, '-').match(/-?\d[\d.,]*\d|-?\d/); return m ? parseInt(m[0].replace(/[.,]/g, ''), 10) : NaN; }
     function clean(s) { return String(s == null ? '' : s).replace(U_MARKS, '').replace(/\s+/g, ' ').trim(); }
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function serverBase() { var s = (STATE.data.server || '').replace(/\/+$/, ''); return /^https?:\/\//i.test(s) ? s : ''; }
@@ -167,13 +179,15 @@
         var le = w.querySelector('.farmListHeader [data-list]');
         var listId = le ? Number(le.getAttribute('data-list')) : null;
         var name = clean((w.querySelector('.farmListName .name') || {}).textContent) || ('list' + (listId || ''));
+        var vw = w.closest('.villageWrapper'); // lists are grouped under their owning village
+        var villageName = vw ? clean((vw.querySelector('.villageName') || {}).textContent) : '';
         var targets = [];
         w.querySelectorAll('tbody tr.slot').forEach(function (tr) {
           var a = tr.querySelector('td.target a[href*="karte.php?x="]'); if (!a) return;
-          var m = (a.getAttribute('href') || '').replace(U_MINUS, '-').match(/x=(-?\d+)&(?:amp;)?y=(-?\d+)/);
+          var m = (a.getAttribute('href') || '').replace(U_DASH, '-').match(/x=(-?\d+)&(?:amp;)?y=(-?\d+)/);
           if (m) targets.push({ x: Number(m[1]), y: Number(m[2]) });
         });
-        lists.push({ listId: listId, name: name, villageDid: null, targets: targets });
+        lists.push({ listId: listId, name: name, villageName: villageName, villageDid: null, targets: targets });
       });
       return lists;
     }
@@ -216,7 +230,7 @@
           for (var i = 0; i < cols.length && i < cells.length; i++) {
             if (cols[i] == null) continue;
             var n = numC(cells[i].textContent);
-            if (!isNaN(n) && n > 0) t['t' + cols[i]] = n;
+            if (!isNaN(n)) t['t' + cols[i]] = n; // record 0s too — the troops page is authoritative
           }
           if (Object.keys(t).length) { if (did) byDid[did] = Object.assign(byDid[did] || {}, t); if (name) byName[name] = Object.assign(byName[name] || {}, t); }
         });
@@ -229,35 +243,60 @@
       return { byDid: byDid, byName: byName };
     }
     function detectTribe(doc) {
+      // NB: the body `villageN` class is the dorf view (1/2), NOT the tribe — don't use it.
       var hay = (doc.body ? (doc.body.getAttribute('class') || '') : '') + ' ' + (doc.documentElement ? (doc.documentElement.getAttribute('class') || '') : '');
-      var m = hay.match(/\btribe(\d+)/) || hay.match(/\bvillage(\d)\b/); // body is "villageN" = game tribe id
+      var m = hay.match(/\btribe(\d+)/);
       if (!m) { var te = doc.querySelector('[class*="tribe"]'); if (te) m = (te.getAttribute('class') || '').match(/tribe(\d+)/); }
       if (m && GAME_TRIBE[m[1]]) return GAME_TRIBE[m[1]];
       var img = doc.querySelector('#troops img.unit, img.unit[class*="u"], [class*="unit"][class*="u"]'); // infer from a global unit id
-      if (img) { var mu = (img.getAttribute('class') || '').match(/\bu(\d{1,2})\b/); if (mu) return RACE_SLUG[Math.floor((+mu[1] - 1) / 10)] || null; }
+      if (img) { var mu = (img.getAttribute('class') || '').match(/\bu(\d{1,2})\b/); if (mu) { var slug = RACE_SLUG[Math.floor((+mu[1] - 1) / 10)]; return UNITS[slug] ? slug : null; } } // ignore nature/natars
       return null;
     }
 
-    // ── merges ──
+    // ── merges (accumulate across sends; never wholesale-overwrite) ──
+    function upsertVillages(vs) {
+      var idx = {}; STATE.data.villages.forEach(function (v, i) { idx[v.did] = i; });
+      vs.forEach(function (v) {
+        if (idx[v.did] != null) { var ex = STATE.data.villages[idx[v.did]]; ex.name = v.name; ex.x = v.x; ex.y = v.y; } // keep its troops
+        else STATE.data.villages.push(v);
+      });
+    }
+    function upsertFarmLists(fl) {
+      var idx = {}; STATE.data.farmLists.forEach(function (l, i) { if (l.listId != null) idx[l.listId] = i; });
+      fl.forEach(function (l) {
+        var i = (l.listId != null) ? idx[l.listId] : null;
+        if (i != null) { var ex = STATE.data.farmLists[i]; ex.name = l.name; if (l.villageName) ex.villageName = l.villageName;
+          if (l.targets.length || !ex.targets.length) ex.targets = l.targets; } // don't clobber captured targets with a collapsed re-parse
+        else STATE.data.farmLists.push(l);
+      });
+    }
+    function mergePending(tr) {
+      var p = STATE.data.pendingTroops, n = 0;
+      Object.keys(tr.byDid).forEach(function (d) { p.byDid[d] = tr.byDid[d]; n++; });
+      Object.keys(tr.byName).forEach(function (nm) { p.byName[nm] = tr.byName[nm]; });
+      return n;
+    }
+    function applyTroops() { // map accumulated troops onto villages by did, then unambiguous name
+      var p = STATE.data.pendingTroops; if (!p) return;
+      var nameCount = {}; STATE.data.villages.forEach(function (v) { nameCount[v.name] = (nameCount[v.name] || 0) + 1; });
+      STATE.data.villages.forEach(function (v) {
+        var t = p.byDid[v.did] || (nameCount[v.name] === 1 ? p.byName[v.name] : null);
+        if (t) v.troops = Object.assign({}, t); // authoritative: replace (so a 0 in the troops page drops the slot)
+      });
+    }
+    function resolveFarmListVillages() { // map each list's owning villageName -> did (null if name ambiguous)
+      var byName = {}; STATE.data.villages.forEach(function (v) { byName[v.name] = (v.name in byName) ? null : v.did; });
+      STATE.data.farmLists.forEach(function (l) { if (l.villageName && byName[l.villageName]) l.villageDid = byName[l.villageName]; });
+    }
     function mergePage(html) {
       var doc; try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { status('Could not parse page HTML.', true); return; }
       var found = [];
-      var vs = parseVillages(doc);
-      if (vs.length) {
-        var oldT = {}; STATE.data.villages.forEach(function (v) { oldT[v.did] = v.troops || {}; });
-        vs.forEach(function (v) { v.troops = oldT[v.did] || {}; });
-        STATE.data.villages = vs; found.push(vs.length + ' villages');
-      }
-      var fl = parseFarmLists(doc);
-      if (fl.length) { STATE.data.farmLists = fl; found.push(fl.length + ' farm lists/' + fl.reduce(function (s, l) { return s + l.targets.length; }, 0) + ' targets'); }
-      var tr = parseTroops(doc), applied = 0;
-      STATE.data.villages.forEach(function (v) {
-        var t = tr.byDid[v.did] || tr.byName[v.name];
-        if (t && Object.keys(t).length) { v.troops = Object.assign(v.troops || {}, t); applied++; }
-      });
-      if (applied) found.push('troops on ' + applied + ' villages');
+      var vs = parseVillages(doc); if (vs.length) { upsertVillages(vs); found.push(vs.length + ' villages'); }
+      var fl = parseFarmLists(doc); if (fl.length) { upsertFarmLists(fl); found.push(fl.length + ' farm lists/' + fl.reduce(function (s, l) { return s + l.targets.length; }, 0) + ' targets'); }
+      var got = mergePending(parseTroops(doc)); if (got) found.push('troops for ' + got + ' villages');
       var tribe = detectTribe(doc); if (tribe) STATE.data.tribe = tribe;
-      applyData(found.length ? ('Page received: ' + found.join(', ') + '.') : 'Page received, but no villages / farm-lists / troops recognised in it (right page? farm lists expanded?).', !found.length);
+      applyTroops(); resolveFarmListVillages();
+      applyData(found.length ? ('Page received: ' + found.join(', ') + '.') : 'Page received, but no villages / farm-lists / troops recognised (right page? farm lists expanded?).', !found.length);
     }
     function mergeOases(p) {
       if (!Array.isArray(p.oases)) return;
@@ -273,12 +312,17 @@
       STATE.data = blank();
       STATE.data.server = obj.server || ''; STATE.data.tribe = String(obj.tribe || 'huns').toLowerCase(); STATE.data.mapRadius = Number(obj.mapRadius) || 200;
       obj.villages.forEach(function (v) {
-        if (!v || v.did == null || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) return;
+        if (!v || !isFinite(Number(v.did)) || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) return;
         var troops = {}; if (v.troops) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = Number(v.troops[k]) || 0; });
-        STATE.data.villages.push({ did: v.did, name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
+        STATE.data.villages.push({ did: Number(v.did), name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
       });
-      mergeOases({ oases: obj.oases }); // also runs applyData
-      STATE.data.farmLists = Array.isArray(obj.farmLists) ? obj.farmLists : [];
+      STATE.data.oases = obj.oases.filter(function (o) { return o && isFinite(Number(o.x)) && isFinite(Number(o.y)); })
+        .map(function (o) { return { x: Number(o.x), y: Number(o.y), bonuses: Array.isArray(o.bonuses) ? o.bonuses.filter(function (b) { return b && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct)); }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; }) : [] }; });
+      STATE.data.farmLists = (Array.isArray(obj.farmLists) ? obj.farmLists : []).map(function (l) {
+        return { listId: l.listId != null ? Number(l.listId) : null, name: String(l.name == null ? '' : l.name), villageName: l.villageName || '',
+                 villageDid: (l.villageDid != null && isFinite(Number(l.villageDid))) ? Number(l.villageDid) : null,
+                 targets: Array.isArray(l.targets) ? l.targets.filter(function (t) { return t && isFinite(Number(t.x)) && isFinite(Number(t.y)); }).map(function (t) { return { x: Number(t.x), y: Number(t.y) }; }) : [] };
+      });
       applyData('Imported ' + STATE.data.villages.length + ' villages, ' + STATE.data.oases.length + ' oases, ' + STATE.data.farmLists.length + ' farm lists.');
     }
 
@@ -309,8 +353,8 @@
     function renderTribeSel() {
       var sel = $('tribeSel'); sel.innerHTML = '';
       TRIBES.forEach(function (t) { var o = document.createElement('option'); o.value = t.id; o.textContent = t.name; sel.appendChild(o); });
-      sel.addEventListener('change', function () { STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; renderCav(); STATE.controls = true; renderVillages(); persist(); });
     }
+    function onTribeChange() { var sel = $('tribeSel'); STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; renderCav(); STATE.controls = true; renderVillages(); persist(); }
     function renderCav() {
       var row = $('cavRow'); row.innerHTML = '';
       var list = cav(STATE.data.tribe);
@@ -448,19 +492,26 @@
     $('btnRun').addEventListener('click', runOptimize);
 
     // ── collector hand-off (postMessage) ──
-    function isGameOrigin(o) { try { return /(^|\.)travian\./i.test(new URL(o).hostname); } catch (e) { return false; } }
+    function isGameOrigin(o) { try { return /(^|\.)travian\.[a-z.]+$/i.test(new URL(o).hostname); } catch (e) { return false; } } // suffix, not prefix
+    var seenMsg = {};
     window.addEventListener('message', function (ev) {
       if (!isGameOrigin(ev.origin) && ev.origin !== location.origin) return; // collector (travian) or same-origin (tests)
       var d = ev.data; if (!d || typeof d !== 'object') return;
+      function ack() { try { if (ev.source && d.id != null) ev.source.postMessage('pve-got:' + d.id, ev.origin); } catch (e) {} }
+      if (d.id != null && seenMsg[d.id]) { ack(); return; } // dedupe re-posts (collector retries until ack'd)
       if (d.pve === 'oases') mergeOases(d);
       else if (d.pve === 'page' && typeof d.html === 'string') mergePage(d.html);
       else if (Array.isArray(d.villages) && Array.isArray(d.oases)) loadData(d); // legacy full payload
+      else return;
+      if (d.id != null) seenMsg[d.id] = 1;
+      ack();
     });
     try { if (window.opener) window.opener.postMessage('pve-ready', '*'); } catch (e) { /* ignore */ }
 
     // ── boot ──
     restore();
     renderTribeSel(); renderRes();
+    $('tribeSel').addEventListener('change', onTribeChange); // bound once
     if (STATE.data.villages.length || STATE.data.oases.length) applyData('Restored your last session.'); else status('Waiting for data… (Scan oases + Send page from the collector, or Import a file.)');
     refreshSolverStatus();
     window.addEventListener('load', refreshSolverStatus);

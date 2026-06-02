@@ -190,7 +190,9 @@
     opts = opts || {};
     var g = greedy(inst);
     if (g.count >= inst.maxPossible) {
-      return Object.assign(g, { method: 'greedy (provably optimal — every reachable oasis placed)', optimal: true });
+      // count-optimal: every reachable oasis is placed (can't beat that). Movement total is a
+      // cheapest-first estimate, not provably minimal — the exact path's ε-term would shave it.
+      return Object.assign(g, { method: 'greedy (count-optimal — every reachable oasis placed)', optimal: true });
     }
     var limit = opts.maxExactPairs || 1500;
     if (opts.solver && inst.pairs.length <= limit) {
