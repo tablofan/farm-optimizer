@@ -127,6 +127,7 @@
     'use strict';
     var $ = function (id) { return document.getElementById(id); };
     function el(tag, attrs, html) { var e = document.createElement(tag); if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
+    function intSec(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 300; } // sending interval: whole seconds ≥ 1
 
     // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
     var STORE = 'pveData';
@@ -150,7 +151,7 @@
       if (typeof d.scannedAt !== 'string') d.scannedAt = '';
       if (!Array.isArray(d.skipped)) d.skipped = [];
       if (!d.config || typeof d.config !== 'object') d.config = {};
-      if (!(Number(d.config.intervalSec) > 0)) d.config.intervalSec = 300;
+      d.config.intervalSec = intSec(d.config.intervalSec);
       if (!d.config.perVillage || typeof d.config.perVillage !== 'object') d.config.perVillage = {};
     }
 
@@ -330,6 +331,12 @@
       if (!obj || !Array.isArray(obj.villages) || !Array.isArray(obj.oases)) { status('Invalid data: need {villages:[], oases:[], …}.', true); return; }
       STATE.data = blank();
       STATE.data.server = obj.server || ''; STATE.data.tribe = String(obj.tribe || 'huns').toLowerCase(); STATE.data.mapRadius = Number(obj.mapRadius) || 200;
+      STATE.data.scannedAt = (typeof obj.scannedAt === 'string') ? obj.scannedAt : ''; // keep the scan freshness
+      if (Array.isArray(obj.skipped)) STATE.data.skipped = obj.skipped.filter(function (k) { return typeof k === 'string'; }); // round-trip skips
+      if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + per-village TS/artefact/include
+        STATE.data.config.intervalSec = intSec(obj.config.intervalSec);
+        if (obj.config.perVillage && typeof obj.config.perVillage === 'object') STATE.data.config.perVillage = obj.config.perVillage;
+      }
       obj.villages.forEach(function (v) {
         if (!v || !isFinite(Number(v.did)) || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) return;
         var troops = {}; if (v.troops) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = Number(v.troops[k]) || 0; });
@@ -439,7 +446,7 @@
     // edits to troop counts / TS / artefact / include + the global interval -> update state & persist.
     document.addEventListener('input', function (ev) {
       var t = ev.target; if (!t || !t.classList) return;
-      if (t.id === 'gIntSec') { var sec = Number(t.value); STATE.data.config.intervalSec = (isFinite(sec) && sec > 0) ? sec : 300; persist(); return; }
+      if (t.id === 'gIntSec') { STATE.data.config.intervalSec = intSec(t.value); persist(); return; }
       var tr = t.closest && t.closest('tr[data-did]'); if (!tr) return;
       var did = tr.getAttribute('data-did');
       if (t.classList.contains('vtr')) {
@@ -466,8 +473,7 @@
       persist(); renderVillages();
     }
     function gatherCfg() {
-      var intervalSec = Number($('gIntSec').value); if (!(intervalSec > 0)) intervalSec = 300;
-      var intervalMin = intervalSec / 60; // optimizer cost model is in minutes; the UI is in seconds
+      var intervalMin = intSec($('gIntSec').value) / 60; // optimizer cost model is in minutes; the UI is in seconds
       var perVillage = {}, included = [];
       Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
         var did = Number(tr.getAttribute('data-did'));
@@ -511,7 +517,8 @@
       drawDiff(rows);
     }
     // grouping key: current holder for keep/move/remove; destination for an add (no current holder).
-    function groupKeyFor(r) { return (r.status === 'add' || r.status === 'keep') ? r.toVillage : (r.fromVillage || r.toVillage); }
+    // Keyed on the village DID (not name — Travian allows duplicate names that would otherwise merge).
+    function groupKeyFor(r) { return (r.status === 'add' || r.status === 'keep') ? r.toDid : (r.fromDid != null ? r.fromDid : r.toDid); }
     function isSkipped(k) { return (STATE.data.skipped || []).indexOf(k) >= 0; }
     function rowDetail(r) {
       if (r.status === 'move') return '→ ' + esc(r.toVillage || '?');
@@ -522,14 +529,15 @@
       var k = r.x + '|' + r.y;
       var nowSkipped = isSkipped(k);
       var wasRemoveSkipped = (r.status === 'remove' && r.reason === 'skipped');
-      var ctrl = '';
-      if (r.status === 'add' || r.status === 'keep' || r.status === 'move' || wasRemoveSkipped) {
-        ctrl = nowSkipped
-          ? '<button class="mini unskip" data-key="' + esc(k) + '">unskip</button>'
-          : '<button class="mini skip" data-key="' + esc(k) + '">skip</button>';
-      }
-      // a skip/unskip clicked since the last Optimise = pending (mark, but plan not yet recomputed)
-      var pending = (nowSkipped && !wasRemoveSkipped) || (!nowSkipped && wasRemoveSkipped);
+      var hasCtrl = (r.status === 'add' || r.status === 'keep' || r.status === 'move' || wasRemoveSkipped);
+      var ctrl = hasCtrl
+        ? (nowSkipped
+            ? '<button class="mini unskip" data-key="' + esc(k) + '">unskip</button>'
+            : '<button class="mini skip" data-key="' + esc(k) + '">skip</button>')
+        : '';
+      // a skip/unskip clicked since the last Optimise = pending — only on rows that have a control,
+      // so a duplicate/over-capacity remove row for the same tile doesn't show an unactionable note.
+      var pending = hasCtrl && ((nowSkipped && !wasRemoveSkipped) || (!nowSkipped && wasRemoveSkipped));
       var note = pending ? (nowSkipped ? ' <span class="err">· will skip on next Optimise</span>' : ' <span class="err">· will re-add on next Optimise</span>') : '';
       return '<tr' + (pending ? ' class="pending"' : '') + '><td><span class="badge b-' + r.status + '">' + r.status + '</span></td>'
         + '<td>' + mapLink(r.x, r.y) + '</td><td>' + typeLabel(r.bonuses) + '</td>'
@@ -537,30 +545,32 @@
     }
     function drawDiff(rows) {
       var show = {}; Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) { show[l.getAttribute('data-st')] = l.querySelector('input').checked; });
-      var ord = {}; STATE.data.villages.forEach(function (v, i) { ord[v.name] = i; });
+      var ord = {}, nameByDid = {}; STATE.data.villages.forEach(function (v, i) { ord[v.did] = i; nameByDid[v.did] = v.name; });
       var statusOrder = { add: 0, move: 1, keep: 2, remove: 3 };
-      var groups = {}, names = [], allKeys = {};
-      rows.forEach(function (r) { allKeys[r.x + '|' + r.y] = true; });
+      var groups = {}, names = [], shownKeys = {};
       rows.filter(function (r) { return show[r.status]; }).forEach(function (r) {
-        var g = groupKeyFor(r) || '—';
+        shownKeys[r.x + '|' + r.y] = true; // only rows actually rendered count as "surfaced"
+        var g = groupKeyFor(r); if (g == null) g = '—';
         if (!groups[g]) { groups[g] = []; names.push(g); }
         groups[g].push(r);
       });
-      names.sort(function (a, b) { var oa = ord[a] == null ? 1e9 : ord[a], ob = ord[b] == null ? 1e9 : ord[b]; return (oa - ob) || a.localeCompare(b); });
+      names.sort(function (a, b) { var oa = ord[a] == null ? 1e9 : ord[a], ob = ord[b] == null ? 1e9 : ord[b]; return (oa - ob) || String(a).localeCompare(String(b)); });
       var html = '';
       names.forEach(function (g) {
+        var label = nameByDid[g]; if (label == null) label = '—';
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
-        html += '<div class="vgroup"><div class="vgroup-h">' + esc(g) + ' <span class="muted">(' + list.length + ')</span></div>'
+        html += '<div class="vgroup"><div class="vgroup-h">' + esc(label) + ' <span class="muted">(' + list.length + ')</span></div>'
           + '<table><tr><th>Action</th><th>Oasis</th><th>Type</th><th>Detail</th><th></th></tr>'
           + list.map(rowHtml).join('') + '</table></div>';
       });
-      // "Skipped, not farmed": skips that never surface as a plan row (not a current free-oasis target).
-      var notFarmed = (STATE.data.skipped || []).filter(function (k) { return !allKeys[k]; });
-      if (notFarmed.length) {
+      // "Skipped": every skipped oasis not already shown as a visible row above (genuinely not farmed,
+      // OR hidden by a status filter) — guarantees each skip is reachable with an unskip exactly once.
+      var leftover = (STATE.data.skipped || []).filter(function (k) { return !shownKeys[k]; });
+      if (leftover.length) {
         var oByKey = {}; (STATE.data.oases || []).forEach(function (o) { oByKey[o.x + '|' + o.y] = o; });
-        html += '<div class="vgroup"><div class="vgroup-h">Skipped, not farmed <span class="muted">(' + notFarmed.length + ')</span></div>'
+        html += '<div class="vgroup"><div class="vgroup-h">Skipped <span class="muted">(' + leftover.length + ')</span></div>'
           + '<table><tr><th>Oasis</th><th>Type</th><th></th></tr>'
-          + notFarmed.map(function (k) {
+          + leftover.map(function (k) {
             var p = k.split('|'), o = oByKey[k];
             return '<tr><td>' + mapLink(Number(p[0]), Number(p[1])) + '</td><td>' + (o ? typeLabel(o.bonuses) : '<span class="muted">—</span>')
               + '</td><td><button class="mini unskip" data-key="' + esc(k) + '">unskip</button></td></tr>';
