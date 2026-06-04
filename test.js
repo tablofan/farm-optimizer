@@ -153,6 +153,31 @@ t('distance is a non-rounded float', () => {
   approx(d, Math.sqrt(5));
   assert(d !== Math.round(d), 'kept as float (matches in-game ETA precision)');
 });
+console.log('skip (global opt-out)');
+t('skipped oasis is dropped from the candidate set (never assigned)', () => {
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }, { x: 2, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
+    farmLists: [] };
+  const base = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(base.oases.length, 2, 'both oases candidates without a skip');
+  const skip = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } }, skipped: ['1|0'] });
+  assert.strictEqual(skip.oases.length, 1, 'skipped tile removed from candidates');
+  assert(skip.oases.every(o => !(o.x === 1 && o.y === 0)), 'skipped oasis absent');
+  assert(skip.maxPossible <= 1, 'skipped oasis not counted as reachable');
+});
+t('currently-farmed skipped oasis -> remove with reason "skipped"', () => {
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
+    farmLists: [{ listId: 1, name: 'A', villageDid: 1, targets: [{ x: 1, y: 0 }] }] };
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } }, skipped: ['1|0'] });
+  const r = PVE.solve(inst, {});
+  const rows = PVE.planDiff(data, inst, r, ['1|0']);
+  const rem = rows.find(x => x.status === 'remove' && x.x === 1 && x.y === 0);
+  assert(rem && rem.reason === 'skipped', 'tagged skipped, not resource-filter');
+});
 t('oases at the same tile are deduped in buildInstance', () => {
   const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
     oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }, { x: 1, y: 0, bonuses: [{ res: 'crop', pct: 50 }] }],

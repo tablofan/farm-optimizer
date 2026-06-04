@@ -38,7 +38,8 @@ occupied-oasis entries in the lists are ignored (never moved or removed). A targ
 if its coordinates match a free oasis in the scan; a target that is no longer a free oasis (e.g.
 annexed since the scan) silently falls out of scope. Removals are tagged with a reason (over
 capacity, excluded by the resource filter, or duplicate). Each row links to the oasis on the in-game
-map (`karte.php?x=…&y=…`).
+map (`karte.php?x=…&y=…`). Removal reasons are: over capacity, excluded by the resource filter,
+duplicate, or **skipped** (a currently-farmed **Skipped oasis**).
 
 **Oasis type**:
 The resource bonus an oasis carries (e.g. +25% lumber, +50% crop, or a double-bonus). Scraped
@@ -46,6 +47,13 @@ per-oasis alongside coordinates. For filtering it collapses to one of the **4 re
 primary (first / non-crop) bonus — e.g. a clay+crop double buckets as **clay** — while the full type
 is still displayed.
 _Avoid_: oasis bonus (use only as a clarifier), oasis kind.
+
+**Skipped oasis**:
+A free oasis the player has manually marked **skip**, so the optimizer never assigns it to any
+village (global — not per-village). Distinct from a resource-filtered or annexed oasis: the tile is a
+perfectly valid free farm target, the player just opts it out by hand. Skips **persist across
+sessions** (wiped only by Clear data) and stay listed on the results page with an **unskip** control.
+_Avoid_: excluded (reserved for the resource-filter / annexed senses below), opted-out.
 
 **Village**:
 One of the player's own bases, with map coordinates and a stock of trainable cavalry. The origin
@@ -65,7 +73,8 @@ send-size knob.)
 _Avoid_: clearing party (a rainbow here farms empty oases, it does not clear animals).
 
 **Sending interval**:
-How often (minutes) a village re-sends its farm list. Drives how many rainbows a given oasis ties up.
+How often (**seconds**) a village re-sends its farm list. Drives how many rainbows a given oasis ties
+up (cost uses round-trip time and interval in consistent units).
 
 **Travel time**:
 Minutes for cavalry to reach an oasis, derived from **distance**, cavalry speed, **Tournament Square**
@@ -82,7 +91,9 @@ A village building that increases travel speed for the portion of a trip beyond 
 _Avoid_: TS (spell out at least once per surface).
 
 **Speed artefact**:
-An account-wide multiplier on troop travel speed.
+A multiplier on troop travel speed, set **per village**: a *small* speed artefact boosts a single
+village, while an account-wide (*unique/large*) artefact is modelled by setting the same multiplier on
+every village. _Was_: described as strictly account-wide — corrected, since this tool keys it per village.
 
 **Capacity**:
 A village's available **Rainbows** = `min` over the selected cavalry types of their counts. The
@@ -116,3 +127,4 @@ but does not optimize against it.
 - **Farming vs Clearing** — *Farming* = repeatedly raiding an empty **Oasis** for resources (this tool's whole scope). *Clearing* = killing the animal garrison first (combat). Clearing is **out of scope**; oases are assumed pre-cleared.
 - **"Rainbow"** — in the wider Travian community can mean a mixed clearing party; **here** it means a fixed-size cavalry farm-send (111/222/333). Resolved to the farming meaning.
 - **"Travel length" (Excel) vs "Distance"** — the Excel's manually-entered "travel length (sq)" is what this tool calls **Distance** and computes from coordinates.
+- **"Excluded" vs "Skipped"** — three different "this oasis is not farmed" senses, kept distinct: an **annexed/occupied** oasis is excluded because it is not a free target; a **resource-filtered** oasis is excluded by the 4-resource filter (a whole-type toggle); a **Skipped oasis** is one specific free tile the player opted out by hand. Only the last is "skip"; the first two are "excluded".
