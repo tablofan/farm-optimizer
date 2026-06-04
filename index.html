@@ -520,6 +520,12 @@
     // Keyed on the village DID (not name — Travian allows duplicate names that would otherwise merge).
     function groupKeyFor(r) { return (r.status === 'add' || r.status === 'keep') ? r.toDid : (r.fromDid != null ? r.fromDid : r.toDid); }
     function isSkipped(k) { return (STATE.data.skipped || []).indexOf(k) >= 0; }
+    // distance (fields) from the oasis to the village whose group this row sits under
+    function rowDist(r) {
+      var vdid = groupKeyFor(r); if (vdid == null) return null;
+      var v = villageByDid(vdid);
+      return v ? PVE.distance(r.x, r.y, v.x, v.y, STATE.data.mapRadius || 200) : null;
+    }
     function rowDetail(r) {
       if (r.status === 'move') return '→ ' + esc(r.toVillage || '?');
       if (r.status === 'remove') return esc(r.reason || '');
@@ -539,8 +545,9 @@
       // so a duplicate/over-capacity remove row for the same tile doesn't show an unactionable note.
       var pending = hasCtrl && ((nowSkipped && !wasRemoveSkipped) || (!nowSkipped && wasRemoveSkipped));
       var note = pending ? (nowSkipped ? ' <span class="err">· will skip on next Optimise</span>' : ' <span class="err">· will re-add on next Optimise</span>') : '';
+      var d = rowDist(r);
       return '<tr' + (pending ? ' class="pending"' : '') + '><td><span class="badge b-' + r.status + '">' + r.status + '</span></td>'
-        + '<td>' + mapLink(r.x, r.y) + '</td><td>' + typeLabel(r.bonuses) + '</td>'
+        + '<td>' + mapLink(r.x, r.y) + '</td><td class="muted">' + (d == null ? '—' : d.toFixed(1)) + '</td><td>' + typeLabel(r.bonuses) + '</td>'
         + '<td class="muted">' + rowDetail(r) + note + '</td><td>' + ctrl + '</td></tr>';
     }
     function drawDiff(rows) {
@@ -560,7 +567,7 @@
         var label = nameByDid[g]; if (label == null) label = '—';
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
         html += '<div class="vgroup"><div class="vgroup-h">' + esc(label) + ' <span class="muted">(' + list.length + ')</span></div>'
-          + '<table><tr><th>Action</th><th>Oasis</th><th>Type</th><th>Detail</th><th></th></tr>'
+          + '<table><tr><th>Action</th><th>Oasis</th><th>Dist</th><th>Type</th><th>Detail</th><th></th></tr>'
           + list.map(rowHtml).join('') + '</table></div>';
       });
       // "Skipped": every skipped oasis not already shown as a visible row above (genuinely not farmed,
