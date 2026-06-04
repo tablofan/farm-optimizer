@@ -55,8 +55,15 @@
   // data: { tribe, mapRadius, villages:[{did,name,x,y,troops:{tN:count}}],
   //         oases:[{x,y,bonuses:[{res,pct}]}], farmLists:[...] }
   // cfg:  { units, selectedSlots:[..], includedDids:Set/array, resourceFilter:{wood,..},
-  //         perVillage:{did:{ts,interval,artefact}} }
+  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …] }
   // units = UNITS[tribe] (slot->unit array). Returns an instance for the solver.
+  // `skipped` (a coord key set) removes those oases from every village's candidate set entirely —
+  // they are never assigned (a Skipped oasis is a deliberate, global player opt-out). See CONTEXT.md.
+  function skipLookup(skipped) {
+    var m = {};
+    (skipped || []).forEach(function (s) { m[typeof s === 'string' ? s : (s.x + '|' + s.y)] = true; });
+    return m;
+  }
   function buildInstance(data, cfg) {
     var unitsForTribe = cfg.units;
     var bySlot = {};
@@ -87,9 +94,11 @@
       });
 
     var filter = cfg.resourceFilter || { wood: true, clay: true, iron: true, crop: true };
+    var skipped = skipLookup(cfg.skipped);
     var oseen = {};
     var oases = data.oases
       .filter(function (o) { var k = o.x + '|' + o.y; if (oseen[k]) return false; oseen[k] = 1; return true; }) // dedupe by tile
+      .filter(function (o) { return !skipped[o.x + '|' + o.y]; }) // drop Skipped oases (global opt-out)
       .map(function (o) { return { x: o.x, y: o.y, bonuses: o.bonuses, res: primaryRes(o.bonuses) }; })
       .filter(function (o) { return o.res && filter[o.res]; });
 
@@ -211,8 +220,11 @@
 
   // ── Plan diff vs current farm lists (free oases only) ──────────────
   // Returns rows grouped per village action: keep/add/move/remove.
-  function planDiff(data, inst, result) {
+  // `skipped` (coord key set) lets a currently-farmed Skipped oasis be tagged reason 'skipped'
+  // rather than misattributed to the resource filter (both are absent from inst.oases).
+  function planDiff(data, inst, result, skipped) {
     var key = function (x, y) { return x + '|' + y; };
+    var skippedKey = skipLookup(skipped);
     // optimal: oasisKey -> villageDid
     var optByKey = {};
     Object.keys(result.assign).forEach(function (oiStr) {
@@ -262,7 +274,8 @@
     Object.keys(curByKey).forEach(function (k) {
       if (optByKey[k]) return; // handled above (keep/move)
       var o = allFreeByKey[k];
-      var reason = freeByKey[k] ? 'over capacity / not optimal' : 'excluded by resource filter';
+      var reason = skippedKey[k] ? 'skipped'
+        : (freeByKey[k] ? 'over capacity / not optimal' : 'excluded by resource filter');
       curByKey[k].forEach(function (fromDid) {
         rows.push(row(o, 'remove', null, fromDid, vName, reason));
       });

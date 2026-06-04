@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PvE Optimizer — Collector
 // @namespace    https://github.com/ren/pve-optimizer
-// @version      0.5.0
-// @description  Scan all free oases (map API) on a Travian T4.6 gameworld and send them — plus the current page's HTML — to the PvE Optimizer calculator, which does the parsing.
+// @version      0.6.0
+// @description  Scan all free oases (map API) on a Travian T4.6 gameworld and send them (or download them as a file) — plus the current page's HTML — to the PvE Optimizer calculator, which does the parsing.
 // @match        *://*.travian.com/*
 // @run-at       document-idle
 // @grant        none
@@ -26,6 +26,7 @@
   function saveCfg() { try { localStorage.setItem('pveCollectorCfg', JSON.stringify(CFG)); } catch (e) { /* ignore */ } }
 
   var oases = []; try { oases = JSON.parse(localStorage.getItem('pveOasesCache') || '[]') || []; } catch (e) { oases = []; }
+  var oasesScannedAt = ''; try { oasesScannedAt = localStorage.getItem('pveOasesScannedAt') || ''; } catch (e) { oasesScannedAt = ''; }
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function jitter() { return THROTTLE_MIN + Math.floor(Math.random() * (THROTTLE_MAX - THROTTLE_MIN)); }
@@ -77,8 +78,10 @@
       await sleep(jitter());
     }
     oases = found;
-    try { localStorage.setItem('pveOasesCache', JSON.stringify(oases)); } catch (e) { log('(too large to cache — kept in memory; Send oases before navigating away)'); }
-    log('Done: ' + oases.length + ' free oases' + (noBonus ? ' (' + noBonus + ' with unreadable bonus)' : '') + '. Now click "Send oases".');
+    oasesScannedAt = new Date().toISOString();
+    try { localStorage.setItem('pveOasesCache', JSON.stringify(oases)); } catch (e) { log('(too large to cache — kept in memory; Send/Download oases before navigating away)'); }
+    try { localStorage.setItem('pveOasesScannedAt', oasesScannedAt); } catch (e) { /* tiny — ignore */ }
+    log('Done: ' + oases.length + ' free oases' + (noBonus ? ' (' + noBonus + ' with unreadable bonus)' : '') + '. Now "Send oases" (to the calculator) or "Download oases" (save a file).');
   }
 
   // ── send a payload to the calculator (single-flight; deliver on ready/retry; stop on ack) ──
@@ -108,7 +111,25 @@
   function sendPage(log) { send({ pve: 'page', html: document.documentElement.outerHTML, server: location.origin }, log); }
   function sendOases(log) {
     if (!oases.length) { log('Scan oases first.'); return; }
-    send({ pve: 'oases', oases: oases, server: location.origin, mapRadius: CFG.radius }, log); // radius = world half-size
+    send({ pve: 'oases', oases: oases, server: location.origin, mapRadius: CFG.radius, scannedAt: oasesScannedAt }, log); // radius = world half-size
+  }
+
+  // ── download oases as a portable file (oases are permanent for the world's life; this survives a
+  //    localStorage clear / new machine, and re-imports into the calculator as a merge). ──
+  function downloadOases(log) {
+    if (!oases.length) { log('Scan oases first.'); return; }
+    var when = oasesScannedAt || new Date().toISOString();
+    var payload = { pve: 'oases', oases: oases, server: location.origin, mapRadius: CFG.radius, scannedAt: when };
+    try {
+      var blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var host = (location.hostname || 'world').replace(/[^a-z0-9.\-]/gi, '');
+      var a = document.createElement('a');
+      a.href = url; a.download = 'pve-oases-' + host + '-' + when.slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 1000);
+      log('Downloaded ' + oases.length + ' oases (' + a.download + '). Import it in the calculator.');
+    } catch (e) { log('Download failed: ' + e.message); }
   }
 
   // ── panel ──
@@ -119,7 +140,7 @@
       '<div style="font-weight:600;color:#f5f0e8;margin-bottom:6px">PvE Optimizer — Collector</div>' +
       '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">Map ± <input id="pveRad" type="number" title="world half-size, e.g. 200 for a −200..200 map" style="width:54px" value="' + CFG.radius + '"> Step <input id="pveStep" type="number" style="width:44px" value="' + CFG.step + '"></div>' +
       '<input id="pveCalc" placeholder="Calculator URL (required)" style="width:100%;margin-bottom:6px" value="' + (CFG.calcUrl || '') + '">' +
-      '<div style="display:flex;gap:4px;flex-wrap:wrap"><button id="pveScan">Scan oases</button><button id="pveSendO">Send oases</button><button id="pveSendP">Send this page</button></div>' +
+      '<div style="display:flex;gap:4px;flex-wrap:wrap"><button id="pveScan">Scan oases</button><button id="pveSendO">Send oases</button><button id="pveDlO">Download oases</button><button id="pveSendP">Send this page</button></div>' +
       '<div id="pveLog" style="margin-top:8px;max-height:170px;overflow:auto;font-family:monospace;font-size:11px;color:#a8a29e"></div>';
     document.body.appendChild(p);
     Array.prototype.forEach.call(p.querySelectorAll('button'), function (b) { b.style.cssText = 'background:#44403c;color:#f5f0e8;border:1px solid #57534e;border-radius:5px;padding:5px 8px;cursor:pointer;font-size:11px'; });
@@ -129,9 +150,10 @@
     function readCfg() { CFG.radius = Number(p.querySelector('#pveRad').value) || 200; CFG.step = Number(p.querySelector('#pveStep').value) || 30; CFG.calcUrl = p.querySelector('#pveCalc').value.trim(); saveCfg(); }
     p.querySelector('#pveScan').onclick = function () { readCfg(); scanOases(log); };
     p.querySelector('#pveSendO').onclick = function () { readCfg(); sendOases(log); };
+    p.querySelector('#pveDlO').onclick = function () { readCfg(); downloadOases(log); };
     p.querySelector('#pveSendP').onclick = function () { readCfg(); sendPage(log); };
-    log('Ready. Flow: Scan oases → Send oases. Then open each page (village list, EXPANDED farm lists, troops overview) and Send this page.');
-    if (oases.length) log('(' + oases.length + ' oases cached from a previous scan — Send oases to reuse.)');
+    log('Ready. Flow: Scan oases → Send oases (or Download oases to save a file). Then open each page (village list, EXPANDED farm lists, troops overview) and Send this page.');
+    if (oases.length) log('(' + oases.length + ' oases cached' + (oasesScannedAt ? ' from ' + oasesScannedAt.slice(0, 10) : '') + ' — Send or Download oases to reuse.)');
   }
 
   if (document.body) buildPanel(); else window.addEventListener('DOMContentLoaded', buildPanel);

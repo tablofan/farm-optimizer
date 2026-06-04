@@ -9,18 +9,23 @@ for the build plan / data contract.
 
 ## Two parts
 
-1. **Collector** (`collector.user.js`) — a Tampermonkey userscript on the gameworld, read-only, with
-   two jobs: **Scan oases** (sweep `POST /api/v1/map/position` — the only way to enumerate the whole
-   map's free oases) and **Send page** (`postMessage` the current rendered HTML to the calculator).
-   It does *no* parsing — the page HTML carries villages / farm-lists / troops, and the calculator
-   parses it. (Parsing lives in the calculator so selectors can be fixed by redeploying the page,
-   with no userscript reinstall.) Never writes to the game.
+1. **Collector** (`collector.user.js`) — a Tampermonkey userscript on the gameworld, read-only.
+   **Scan oases** (sweep `POST /api/v1/map/position` — the only way to enumerate the whole map's
+   free oases; the scan is stamped with a `scannedAt` time), then either **Send oases** /
+   **Send page** (`postMessage` to the calculator) or **Download oases** (save the scan as a portable
+   `{pve:'oases', …, scannedAt}` JSON file — oases are permanent for the world's life, so this
+   survives a localStorage clear / new machine). It does *no* parsing — the page HTML carries
+   villages / farm-lists / troops, and the calculator parses it. (Parsing lives in the calculator so
+   selectors can be fixed by redeploying the page, with no userscript reinstall.) Never writes to the game.
 2. **Calculator** (`index.html`) — a static page that **accumulates** sent data (oases + each sent
    page) and **persists** it in localStorage. It parses villages / farm-lists / troops from sent
-   pages, lets you pick ≤3 cavalry types, set per-village TS / interval / artefact, **edit troop
-   counts** (fallback when a troops page isn't sent), filter by resource, and Optimise. Shows a
-   **display-only plan diff** (keep / add / move / remove) versus your current farm lists, each oasis
-   linking to the in-game map. Also accepts a saved page (`.htm`) or JSON via Import.
+   pages, lets you pick ≤3 cavalry types, set **one global sending interval (seconds)** + per-village
+   TS / artefact (all persisted), **edit troop counts** (fallback when a troops page isn't sent),
+   filter by resource, and Optimise. Shows a **display-only plan diff grouped by village**
+   (keep / add / move / remove; a move stays under its *current* village tagged `→ destination`), lets
+   you **skip** individual oases (a global opt-out — re-Optimise excludes them; persisted), each oasis
+   linking to the in-game map. Import accepts a saved page (`.htm`), an **oases-only file** (merged in,
+   keeping villages/lists/config/skips), or a full JSON dataset (replaces).
 
    *Why send the page, not the map?* Villages/farm-lists/troops all live on one rendered page each
    (Send page captures them). The **map** doesn't: it renders as raster image tiles with no per-tile
@@ -42,7 +47,8 @@ for the build plan / data contract.
 ## How it works
 
 - **Cavalry model** — a "rainbow" = 1 of each selected cavalry type; a village's budget = `min` over
-  the selected types' counts; an oasis costs `ceil(2 × travel / interval)` rainbows. The slowest
+  the selected types' counts; an oasis costs `ceil(2 × travel / interval)` rainbows (the **interval is
+  entered in seconds** in the UI and converted to minutes for the cost model). The slowest
   selected unit sets travel speed (base ×2 for the speed server, ×artefact whole-trip, +20%/TS level
   beyond 20 fields). Distance is Euclidean on the wrapping −200..+200 map.
 - **Optimizer** — a max-cardinality Generalized Assignment Problem. Greedy cheapest-first is run

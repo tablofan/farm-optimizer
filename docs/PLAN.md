@@ -52,6 +52,11 @@ a **Collector** userscript and a static **Calculator** page.
 }
 ```
 
+The collector can also **Download oases** as an oases-only subset of this contract —
+`{ "pve":"oases", "oases":[…], "server":…, "mapRadius":…, "scannedAt":… }` — which the calculator's
+Import **merges** (replaces oases, keeps villages / farm-lists / troops / per-village config / skips),
+rather than the full replace that a complete dataset triggers.
+
 ## Travel / cost model
 
 - `spd_fpm = slowest_selected_base × 2 × artefact[v] / 60` (fields per minute; **×2 = speed-server
@@ -60,8 +65,13 @@ a **Collector** userscript and a static **Calculator** page.
   `dist = √(dx²+dy²)` (kept as a float — matches in-game ETA precision; not rounded).
 - `tt = min(dist,20)/spd_fpm + max(dist−20,0)/(spd_fpm × (1 + 0.2·TS[v]))` minutes (TS only beyond 20
   fields; artefact already in `spd_fpm` applies whole trip; no hero/boots).
-- `cost(o,v) = ceil(2·tt / interval[v])` rainbows; feasible iff `cost ≤ budget[v]`.
+- `cost(o,v) = ceil(2·tt / interval)` rainbows; feasible iff `cost ≤ budget[v]`. `interval` is one
+  **global** value entered in the UI in **seconds**; it is divided by 60 (→ minutes) at the
+  `gatherCfg` boundary so the optimizer's cost model stays in minutes. (Was: per-village, minutes.)
 - `budget[v] = min` over selected cavalry types of that village's count.
+- **Skip** (global opt-out): coords in `cfg.skipped` are dropped from the candidate set in
+  `buildInstance`, so they are never assigned; `planDiff` is also given the skip set so a
+  currently-farmed skipped target is tagged `remove (skipped)` rather than misread as resource-filtered.
 
 ## Optimizer (exact GAP ILP)
 
@@ -75,9 +85,14 @@ a **Collector** userscript and a static **Calculator** page.
 - Match current farm-list targets to scanned free oases by coordinates; **only free oases are in
   scope** (village / occupied-oasis targets ignored).
 - Per oasis: **keep / add / move / remove**; removals reason-tagged (over capacity, excluded by the
-  resource filter, or duplicate). A current target that is no longer a free oasis (annexed) or is a
-  village is silently ignored — the collector only emits free oases, so such targets fall out of
-  scope rather than being flagged. Each row links to `…/karte.php?x=&y=`.
+  resource filter, duplicate, or **skipped**). A current target that is no longer a free oasis
+  (annexed) or is a village is silently ignored — the collector only emits free oases, so such
+  targets fall out of scope rather than being flagged. Each row links to `…/karte.php?x=&y=`.
+- **Grouped by village** in the UI: keep/move/remove under the oasis's *current* holder, add under its
+  destination; a move stays under its current village tagged `→ destination` (shown once, **not**
+  mirrored under the destination — each group is the current contents of that village's list). Empty
+  groups hidden; groups ordered as the in-game village sidebar. Skipped oases that are *not* currently
+  farmed list under "Skipped, not farmed"; every skip row has an **unskip** control.
 
 ## Build order
 
