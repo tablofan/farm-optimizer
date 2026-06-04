@@ -36,10 +36,9 @@ The per-oasis comparison of the optimizer's assignment against the **Current far
 each as **keep / add / move / remove**. Only **free Oases** are reconciled — village and
 occupied-oasis entries in the lists are ignored (never moved or removed). A target is in scope only
 if its coordinates match a free oasis in the scan; a target that is no longer a free oasis (e.g.
-annexed since the scan) silently falls out of scope. Removals are tagged with a reason (over
-capacity, excluded by the resource filter, or duplicate). Each row links to the oasis on the in-game
-map (`karte.php?x=…&y=…`). Removal reasons are: over capacity, excluded by the resource filter,
-duplicate, or **skipped** (a currently-farmed **Skipped oasis**).
+annexed since the scan) silently falls out of scope. Each row links to the oasis on the in-game
+map (`karte.php?x=…&y=…`). Removals are tagged with a reason: over capacity, excluded by the resource
+filter, duplicate, or **skipped** (a currently-farmed **Skipped oasis**).
 
 **Oasis type**:
 The resource bonus an oasis carries (e.g. +25% lumber, +50% crop, or a double-bonus). Scraped

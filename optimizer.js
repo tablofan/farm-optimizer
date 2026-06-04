@@ -289,6 +289,8 @@
       res: primaryRes(o.bonuses),
       bonuses: o.bonuses,
       status: status,
+      toDid: toDid != null ? toDid : null,   // unambiguous ids so the UI can group by village
+      fromDid: fromDid != null ? fromDid : null, // (names can collide — Travian allows duplicates)
       toVillage: toDid != null ? vName[toDid] : null,
       fromVillage: fromDid != null ? vName[fromDid] : null,
       reason: reason

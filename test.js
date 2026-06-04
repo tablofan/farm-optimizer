@@ -153,6 +153,22 @@ t('distance is a non-rounded float', () => {
   approx(d, Math.sqrt(5));
   assert(d !== Math.round(d), 'kept as float (matches in-game ETA precision)');
 });
+t('plan rows carry village dids (so the UI groups by did, not the collidable name)', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'Dup', x: 0, y: 0, troops: { t6: 100 } },   // SAME name…
+               { did: 2, name: 'Dup', x: 1, y: 0, troops: { t6: 100 } }],  // …different did
+    oases: [{ x: 0, y: 1, bonuses: [{ res: 'crop', pct: 25 }] }],
+    farmLists: [{ listId: 1, name: 'L', villageDid: 2, targets: [{ x: 0, y: 1 }] }] };
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1, 2],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  const rows = PVE.planDiff(data, inst, PVE.solve(inst, {}), []);
+  rows.forEach(row => {
+    if (row.toVillage != null) assert(typeof row.toDid === 'number', 'toDid present when toVillage set');
+    if (row.fromVillage != null) assert(typeof row.fromDid === 'number', 'fromDid present when fromVillage set');
+  });
+  assert(rows.some(x => [1, 2].indexOf(x.toDid) >= 0 || [1, 2].indexOf(x.fromDid) >= 0), 'rows reference real dids');
+});
+
 console.log('skip (global opt-out)');
 t('skipped oasis is dropped from the candidate set (never assigned)', () => {
   const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
