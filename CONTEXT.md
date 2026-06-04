@@ -38,7 +38,8 @@ occupied-oasis entries in the lists are ignored (never moved or removed). A targ
 if its coordinates match a free oasis in the scan; a target that is no longer a free oasis (e.g.
 annexed since the scan) silently falls out of scope. Each row links to the oasis on the in-game
 map (`karte.php?x=…&y=…`). Removals are tagged with a reason: over capacity, excluded by the resource
-filter, duplicate, or **skipped** (a currently-farmed **Skipped oasis**).
+filter, **out of range** (beyond the **Travel cap**, or costlier than every village's **Capacity**),
+duplicate, or **skipped** (a currently-farmed **Skipped oasis**).
 
 **Oasis type**:
 The resource bonus an oasis carries (e.g. +25% lumber, +50% crop, or a double-bonus). Scraped
@@ -78,6 +79,15 @@ up (cost uses round-trip time and interval in consistent units).
 **Travel time**:
 Minutes for cavalry to reach an oasis, derived from **distance**, cavalry speed, **Tournament Square**
 level, and **speed artefact** — never entered by hand (the Excel entered it manually; this tool computes it).
+
+**Travel cap**:
+The maximum one-way **Travel time** (minutes, one global value; 0 disables) a farm-send may take. Any
+village→oasis pairing over the cap is **out of range** — discarded before optimizing, exactly like a
+pairing whose cost exceeds the village's **Capacity**. Without it, a long **Sending interval** makes
+every **Oasis** on the gameworld affordable to a large village, and the optimizer assigns absurd
+cross-map farms. Out of range is per-pairing (an oasis may be in range of one village and out of
+range of another); a **Skipped oasis** is a per-tile player choice.
+_Avoid_: max distance (the cap is on time, not fields — TS/artefact shift the field equivalent).
 
 **Distance**:
 Straight-line (Euclidean) map distance in fields between a village and an oasis, computed from their

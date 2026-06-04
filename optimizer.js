@@ -55,7 +55,9 @@
   // data: { tribe, mapRadius, villages:[{did,name,x,y,troops:{tN:count}}],
   //         oases:[{x,y,bonuses:[{res,pct}]}], farmLists:[...] }
   // cfg:  { units, selectedSlots:[..], includedDids:Set/array, resourceFilter:{wood,..},
-  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …] }
+  //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …],
+  //         maxTravelMin: number|null  — Travel cap: drop any (oasis,village) pair whose one-way
+  //                                     travel exceeds this many minutes (null/0 = no cap) }
   // units = UNITS[tribe] (slot->unit array). Returns an instance for the solver.
   // `skipped` (a coord key set) removes those oases from every village's candidate set entirely —
   // they are never assigned (a Skipped oasis is a deliberate, global player opt-out). See CONTEXT.md.
@@ -102,8 +104,13 @@
       .map(function (o) { return { x: o.x, y: o.y, bonuses: o.bonuses, res: primaryRes(o.bonuses) }; })
       .filter(function (o) { return o.res && filter[o.res]; });
 
-    // Feasible (oasis,village) pairs with rainbow cost.
+    // Feasible (oasis,village) pairs with rainbow cost. The Travel cap prunes pairs whose
+    // one-way travel exceeds maxTravelMin BEFORE solving — without it, a long interval makes
+    // the whole map "affordable" for a big village and the solver happily assigns 200-field
+    // farms (and the pair count explodes past what the exact ILP can handle).
+    var cap = (cfg.maxTravelMin && cfg.maxTravelMin > 0) ? cfg.maxTravelMin : null;
     var pairs = [];
+    var capBlocked = {}; // oi -> true if some village would take it but-for the cap (for honest diff reasons)
     var radius = data.mapRadius != null ? data.mapRadius : 200;
     oases.forEach(function (o, oi) {
       villages.forEach(function (v, vi) {
@@ -111,9 +118,9 @@
         var dist = distance(o.x, o.y, v.x, v.y, radius);
         var tmin = travelMinutes(dist, baseSpeed, v.artefact, v.ts);
         var cost = oasisCost(tmin, v.interval);
-        if (cost <= v.budget && isFinite(cost)) {
-          pairs.push({ oi: oi, vi: vi, cost: cost, dist: dist, travelMin: tmin });
-        }
+        if (!(cost <= v.budget && isFinite(cost))) return; // unaffordable regardless of the cap
+        if (cap && tmin > cap) { capBlocked[oi] = true; return; } // affordable, but beyond the Travel cap
+        pairs.push({ oi: oi, vi: vi, cost: cost, dist: dist, travelMin: tmin });
       });
     });
 
@@ -123,10 +130,21 @@
     var maxPossible = Object.keys(feasibleOases).length;
 
     return { villages: villages, oases: oases, pairs: pairs, baseSpeed: baseSpeed,
-             selectedSlots: selected, maxPossible: maxPossible };
+             selectedSlots: selected, maxPossible: maxPossible, maxTravelMin: cap,
+             capBlocked: capBlocked };
   }
 
-  // ── Greedy solver (always available; also the exact-path incumbent) ─
+  // ── Greedy solvers (always available; also the exact-path incumbent) ─
+  // Two O(P log P) constructions, best kept by (count, then movements):
+  //  - greedy: per-oasis cheapest-first (original). An oasis whose cheap village is full
+  //    immediately takes its next-cheapest — possibly very expensive — pair, burning budget
+  //    that many later cheap-only oases needed.
+  //  - greedyPairs: global cheapest-pair packing. An expensive pair is never taken until every
+  //    cheaper pair on the map has had its chance. Benchmarked on a real 16,648-oasis world:
+  //    +20 oases (130→150) on the uncapped 4-village instance and +202 (407→609) on a synthetic
+  //    20-village one; ties everywhere else. Matches the count of far heavier local-search /
+  //    Lagrangian solvers on every benchmark, in ~50-200 ms at 51k-222k pairs.
+  // Neither strictly dominates the other (rare ±1 cases both ways), hence best-of-both.
   function greedy(inst) {
     var candByO = {};
     inst.pairs.forEach(function (p) {
@@ -151,11 +169,34 @@
     return finalize(inst, assign);
   }
 
+  function greedyPairs(inst) {
+    var order = inst.pairs.slice().sort(function (a, b) {
+      return a.cost - b.cost || a.dist - b.dist || a.oi - b.oi || a.vi - b.vi; // deterministic
+    });
+    var remaining = inst.villages.map(function (v) { return v.budget; });
+    var assign = {};
+    order.forEach(function (p) {
+      if (assign[p.oi] === undefined && remaining[p.vi] >= p.cost) {
+        assign[p.oi] = p.vi; remaining[p.vi] -= p.cost;
+      }
+    });
+    return finalize(inst, assign);
+  }
+
+  function bestGreedy(inst) {
+    var a = greedy(inst), b = greedyPairs(inst);
+    return (b.count > a.count || (b.count === a.count && b.movements < a.movements)) ? b : a;
+  }
+
   // ── Exact solver via an injected jsLPSolver-compatible solver ───────
-  function solveExact(inst, solver) {
+  // timeoutMs (optional): jsLPSolver's branch-and-bound stops at the deadline and returns the
+  // best integral solution found so far (or nothing). Measured: B&B time explodes past ~50
+  // pairs on loose-budget instances, so an uncapped run can hang the tab — this is the net.
+  function solveExact(inst, solver, timeoutMs) {
     var totalCost = inst.pairs.reduce(function (s, p) { return s + p.cost; }, 0);
     var eps = 1 / (totalCost + 1); // count dominates; tie-break to cheapest packing
     var model = { optimize: 'score', opType: 'max', constraints: {}, variables: {}, binaries: {} };
+    if (timeoutMs && timeoutMs > 0) model.timeout = timeoutMs;
     inst.oases.forEach(function (o, oi) { model.constraints['o' + oi] = { max: 1 }; });
     inst.villages.forEach(function (v, vi) { model.constraints['v' + vi] = { max: v.budget }; });
     inst.pairs.forEach(function (p, idx) {
@@ -172,19 +213,24 @@
     inst.pairs.forEach(function (p, idx) {
       if (res['x' + idx] && res['x' + idx] > 0.5) assign[p.oi] = p.vi;
     });
-    return finalize(inst, assign);
+    var out = finalize(inst, assign);
+    // A timed-out branch-and-bound with NO integral incumbent leaks the fractional LP relaxation;
+    // rounding that can overshoot budgets (seen live: 622/613). Never surface an infeasible plan.
+    for (var vi = 0; vi < inst.villages.length; vi++) {
+      if (out.used[vi] > inst.villages[vi].budget) return null;
+    }
+    return out;
   }
 
   function finalize(inst, assign) {
     var used = inst.villages.map(function () { return 0; });
     var perVillage = inst.villages.map(function () { return []; });
     var count = 0;
+    var byKey = {}; // (oi|vi) -> pair, so finalize is O(P + assigned), not O(P × assigned)
+    inst.pairs.forEach(function (p) { byKey[p.oi + '|' + p.vi] = p; });
     Object.keys(assign).forEach(function (oiStr) {
       var oi = Number(oiStr), vi = assign[oiStr];
-      var pair = null;
-      for (var k = 0; k < inst.pairs.length; k++) {
-        if (inst.pairs[k].oi === oi && inst.pairs[k].vi === vi) { pair = inst.pairs[k]; break; }
-      }
+      var pair = byKey[oi + '|' + vi];
       if (!pair) return;
       used[vi] += pair.cost;
       perVillage[vi].push({ oi: oi, cost: pair.cost, dist: pair.dist, travelMin: pair.travelMin });
@@ -194,26 +240,41 @@
     return { assign: assign, count: count, used: used, perVillage: perVillage, movements: movements };
   }
 
-  // opts: { solver, maxExactPairs }
+  // opts: { solver, maxExactPairs, exactTimeoutMs }
+  // exactTimeoutMs (default 10s) timeboxes the ILP: a timed-out run yields the best solution
+  // found so far, used only if it beats greedy (more oases, or same oases for fewer movements)
+  // and labelled as not provably optimal.
+  // maxExactPairs defaults to 50 — measured cliff for jsLPSolver's branch-and-bound on this
+  // problem shape: 49 pairs = 36 ms, 62 pairs = 15 s, 78 pairs > 5 min. Beyond it the ILP
+  // attempt just burns the full timeout and loses to greedy.
   function solve(inst, opts) {
     opts = opts || {};
-    var g = greedy(inst);
+    var g = bestGreedy(inst);
     if (g.count >= inst.maxPossible) {
       // count-optimal: every reachable oasis is placed (can't beat that). Movement total is a
-      // cheapest-first estimate, not provably minimal — the exact path's ε-term would shave it.
+      // greedy estimate, not provably minimal — the exact path's ε-term would shave it.
       return Object.assign(g, { method: 'greedy (count-optimal — every reachable oasis placed)', optimal: true });
     }
-    var limit = opts.maxExactPairs || 1500;
+    var limit = opts.maxExactPairs || 50;
+    var timeoutMs = opts.exactTimeoutMs != null ? opts.exactTimeoutMs : 10000;
     if (opts.solver && inst.pairs.length <= limit) {
       try {
-        var e = solveExact(inst, opts.solver);
-        if (e && e.count >= g.count) {
+        var t0 = Date.now();
+        var e = solveExact(inst, opts.solver, timeoutMs);
+        var timedOut = timeoutMs > 0 && (Date.now() - t0) >= timeoutMs;
+        var better = e && (e.count > g.count || (e.count === g.count && e.movements <= g.movements));
+        if (better && !timedOut) {
           return Object.assign(e, { method: 'exact ILP (jsLPSolver)', optimal: true });
+        }
+        if (better && timedOut) {
+          return Object.assign(e, { method: 'ILP, timeboxed at ' + Math.round(timeoutMs / 1000) + 's (best found — not provably optimal)', optimal: false });
         }
       } catch (err) { /* fall through to greedy */ }
     }
     var note = opts.solver
-      ? 'greedy heuristic (instance too large for exact: ' + inst.pairs.length + ' pairs)'
+      ? (inst.pairs.length > limit
+          ? 'greedy heuristic (instance too large for exact: ' + inst.pairs.length + ' pairs)'
+          : 'greedy heuristic (ILP found nothing better within ' + Math.round(timeoutMs / 1000) + 's)')
       : 'greedy heuristic (no ILP solver loaded)';
     return Object.assign(g, { method: note, optimal: false });
   }
@@ -234,6 +295,19 @@
     // scanned free oases by key (only these are in scope)
     var freeByKey = {};
     inst.oases.forEach(function (o) { freeByKey[key(o.x, o.y)] = o; });
+    // oases with >= 1 feasible (oasis,village) pair — anything else is out of range for every
+    // village (beyond the Travel cap, or costlier than any budget), not a solver choice.
+    var reachableByKey = {};
+    inst.pairs.forEach(function (p) {
+      var o = inst.oases[p.oi];
+      reachableByKey[key(o.x, o.y)] = true;
+    });
+    // …and of those, the ones some village could afford but-for the cap (so the reason
+    // names the knob that actually binds — a budget-only failure must not blame the cap).
+    var capBlockedByKey = {};
+    inst.oases.forEach(function (o, oi) {
+      if (inst.capBlocked && inst.capBlocked[oi]) capBlockedByKey[key(o.x, o.y)] = true;
+    });
     // all scanned free oases (incl. filtered-out) — to flag "filtered" removals
     var allFreeByKey = {};
     (data.oases || []).forEach(function (o) { allFreeByKey[key(o.x, o.y)] = o; });
@@ -275,7 +349,9 @@
       if (optByKey[k]) return; // handled above (keep/move)
       var o = allFreeByKey[k];
       var reason = skippedKey[k] ? 'skipped'
-        : (freeByKey[k] ? 'over capacity / not optimal' : 'excluded by resource filter');
+        : !freeByKey[k] ? 'excluded by resource filter'
+        : !reachableByKey[k] ? (capBlockedByKey[k] ? 'out of range (beyond ' + inst.maxTravelMin + ' min travel cap)' : 'out of range (cost exceeds every budget)')
+        : 'over capacity / not optimal';
       curByKey[k].forEach(function (fromDid) {
         rows.push(row(o, 'remove', null, fromDid, vName, reason));
       });
@@ -301,7 +377,8 @@
   var PVE = {
     axisSize: axisSize, torusDelta: torusDelta, distance: distance,
     travelMinutes: travelMinutes, oasisCost: oasisCost, primaryRes: primaryRes, RES: RES,
-    buildInstance: buildInstance, greedy: greedy, solveExact: solveExact, solve: solve,
+    buildInstance: buildInstance, greedy: greedy, greedyPairs: greedyPairs, bestGreedy: bestGreedy,
+    solveExact: solveExact, solve: solve,
     planDiff: planDiff
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = PVE;

@@ -69,6 +69,15 @@ rather than the full replace that a complete dataset triggers.
   **global** value entered in the UI in **seconds**; it is divided by 60 (→ minutes) at the
   `gatherCfg` boundary so the optimizer's cost model stays in minutes. (Was: per-village, minutes.)
 - `budget[v] = min` over selected cavalry types of that village's count.
+- **Travel cap** (`cfg.maxTravelMin`, one **global** value in **minutes**, 0/null = none, default 30):
+  pairs with `tt > cap` are dropped in `buildInstance` before solving; a pair that fails the budget
+  test is pruned as unaffordable regardless of the cap (so diff reasons can name the knob that
+  actually binds). Rationale (measured on a real 16,648-oasis world at interval 190 s): without the
+  cap every oasis is affordable to a large village (cost ≈ 1.46×dist ≤ 355 ≪ budget 613), so the
+  solver may assign farms up to **243 fields** away — and the pair count (51,007) swamps any exact
+  method. With a 30 min cap: 248 pairs, max dist ~13 fields, same farm count (150 — the count gain
+  over the old greedy comes from the best-of-two construction below, not the cap; the cap's payoff
+  is sane assignments and a tractable instance).
 - **Skip** (global opt-out): coords in `cfg.skipped` are dropped from the candidate set in
   `buildInstance`, so they are never assigned; `planDiff` is also given the skip set so a
   currently-farmed skipped target is tagged `remove (skipped)` rather than misread as resource-filtered.
@@ -77,7 +86,24 @@ rather than the full replace that a complete dataset triggers.
 
 - Binary `x[o,v]` per feasible pair. `maximize Σ x[o,v] − ε·Σ cost[o,v]·x[o,v]`.
 - `Σ_v x[o,v] ≤ 1` (oasis ≤ 1 village); `Σ_o cost[o,v]·x[o,v] ≤ budget[v]`.
-- Solve with `glpk.js` (WASM, `<script>`); solver time limit → greedy cheapest-first fallback.
+- **Best-of-two greedy** is the workhorse (`bestGreedy`): (a) per-oasis cheapest-first (`greedy`) and
+  (b) global cheapest-pair packing (`greedyPairs` — all pairs sorted by (cost, dist), assign while
+  the oasis is free and budget remains), keeping the better by (count, then movements). (b) fixes
+  (a)'s budget-burn cascade: an oasis whose cheap village is full immediately takes an expensive
+  fallback pair, stranding later cheap-only oases. Neither strictly dominates (rare ±1 cases both
+  ways — fuzz-verified), hence best-of-both. Benchmarked vs LP bounds on the real 16,648-oasis world
+  (5-algorithm bake-off: regret-greedy, local-search, Lagrangian, custom B&B, pair-packing): pair
+  packing matched the heavy local-search/Lagrangian counts on every config at a fraction of the time
+  (51k pairs: 150/151-bound in ~80 ms; 222k pairs: 609 in ~340 ms; capped configs are degree-1 ⇒
+  greedy provably count-optimal, the LP bound's +1 is a fractional artefact).
+- Solve with `jsLPSolver` (pure JS, CDN `<script>`; was `glpk.js` in the original design). The greedy
+  is the incumbent; the ILP is attempted only at ≤ `maxExactPairs` (**50**) pairs and is **timeboxed**
+  via `model.timeout` (`opts.exactTimeoutMs`, default 10 s — measured: B&B time explodes past ~50
+  pairs on loose-budget instances, e.g. 49 pairs = 36 ms, 62 pairs = 15 s, 78 pairs > 5 min). A
+  timed-out run returns the best incumbent, used only if it beats greedy and labelled not provably
+  optimal. `solveExact` **feasibility-checks** the decoded assignment (budgets) — a timeout with no
+  integral incumbent leaks the fractional LP relaxation, which rounds to budget violations (seen:
+  622/613).
 - **Outgoing-movement estimate** = `Σ cost` over assigned oases; flag against the 20,000 cap.
 
 ## Plan diff (display only)
@@ -85,7 +111,8 @@ rather than the full replace that a complete dataset triggers.
 - Match current farm-list targets to scanned free oases by coordinates; **only free oases are in
   scope** (village / occupied-oasis targets ignored).
 - Per oasis: **keep / add / move / remove**; removals reason-tagged (over capacity, excluded by the
-  resource filter, duplicate, or **skipped**). A current target that is no longer a free oasis
+  resource filter, **out of range** — no feasible pair left: beyond the travel cap or over every
+  budget —, duplicate, or **skipped**). A current target that is no longer a free oasis
   (annexed) or is a village is silently ignored — the collector only emits free oases, so such
   targets fall out of scope rather than being flagged. Each row links to `…/karte.php?x=&y=`.
 - **Grouped by village** in the UI: keep/move/remove under the oasis's *current* holder, add under its

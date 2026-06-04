@@ -19,9 +19,9 @@ for the build plan / data contract.
    selectors can be fixed by redeploying the page, with no userscript reinstall.) Never writes to the game.
 2. **Calculator** (`index.html`) — a static page that **accumulates** sent data (oases + each sent
    page) and **persists** it in localStorage. It parses villages / farm-lists / troops from sent
-   pages, lets you pick ≤3 cavalry types, set **one global sending interval (seconds)** + per-village
-   TS / artefact (all persisted), **edit troop counts** (fallback when a troops page isn't sent),
-   filter by resource, and Optimise. Shows a **display-only plan diff grouped by village**
+   pages, lets you pick ≤3 cavalry types, set **one global sending interval (seconds)** and **travel
+   cap (max one-way minutes, 0 = none)** + per-village TS / artefact (all persisted), **edit troop
+   counts** (fallback when a troops page isn't sent), filter by resource, and Optimise. Shows a **display-only plan diff grouped by village**
    (keep / add / move / remove; a move stays under its *current* village tagged `→ destination`), lets
    you **skip** individual oases (a global opt-out — re-Optimise excludes them; persisted), each oasis
    linking to the in-game map. Import accepts a saved page (`.htm`), an **oases-only file** (merged in,
@@ -51,10 +51,20 @@ for the build plan / data contract.
   entered in seconds** in the UI and converted to minutes for the cost model). The slowest
   selected unit sets travel speed (base ×2 for the speed server, ×artefact whole-trip, +20%/TS level
   beyond 20 fields). Distance is Euclidean on the wrapping −200..+200 map.
-- **Optimizer** — a max-cardinality Generalized Assignment Problem. Greedy cheapest-first is run
-  first; if it places every reachable oasis it is provably optimal, otherwise the exact ILP
-  (`jsLPSolver`, loaded from CDN, falls back to greedy if unavailable or the instance is too large).
-  The plan shows the **outgoing-movement** estimate (= Σ rainbow cost) against the 20,000 game cap.
+- **Optimizer** — a max-cardinality Generalized Assignment Problem. The **travel cap** prunes any
+  (oasis, village) pair beyond the max one-way minutes *before* solving — without it a long interval
+  makes the entire map "affordable" to a big village and the solver assigns 200-field farms. The
+  workhorse is a **best-of-two greedy**: per-oasis cheapest-first *and* global cheapest-pair packing
+  (sort all pairs by cost, assign while oasis free + budget left), keeping the better result — pair
+  packing fixes the budget-burn cascade where an oasis whose cheap village is full immediately grabs
+  an expensive fallback (benchmarked on a real 16,648-oasis world: +20 oases on the uncapped real
+  account, +202 on a synthetic 20-village one; ties capped configs, where greedy is provably
+  optimal). If every reachable oasis is placed the result is flagged optimal; otherwise the exact
+  ILP is tried only at ≤50 pairs (`jsLPSolver`, CDN — its branch-and-bound cliffs at ~60 pairs:
+  62 pairs = 15 s, 78 pairs > 5 min), **timeboxed (10 s)**, its result *feasibility-checked* (a
+  timeout can leak the fractional LP relaxation, which rounds to budget violations) and kept only
+  if it beats greedy. The plan shows the **outgoing-movement** estimate (= Σ rainbow cost) against
+  the 20,000 game cap.
 
 ## Develop / test
 

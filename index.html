@@ -86,6 +86,10 @@
         <input type="number" id="gIntSec" value="300" min="1" step="1"> <span class="muted">seconds</span>
       </div>
       <div class="row" style="margin-top:8px">
+        <span class="muted">Max one-way travel (travel cap, all villages):</span>
+        <input type="number" id="gMaxTravel" value="30" min="0" step="1"> <span class="muted">minutes (0 = no cap — far oases may be assigned)</span>
+      </div>
+      <div class="row" style="margin-top:8px">
         <span class="muted">Apply to all villages:</span>
         TS <input type="number" id="gTs" value="0" min="0" max="20">
         Artefact × <input type="number" id="gArt" value="1" min="0.1" step="0.1">
@@ -128,12 +132,14 @@
     var $ = function (id) { return document.getElementById(id); };
     function el(tag, attrs, html) { var e = document.createElement(tag); if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
     function intSec(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 300; } // sending interval: whole seconds ≥ 1
+    function capMin(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 0) ? n : 30; } // travel cap: whole minutes ≥ 0 (0 = no cap)
 
     // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
     var STORE = 'pveData';
     // `skipped` = ["x|y", …] global per-oasis opt-outs (persisted). `config` = the single global
-    // sending interval (seconds) + per-village TS/artefact/include (persisted; not parsed from the game).
-    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, perVillage: {} } }; }
+    // sending interval (seconds) + travel cap (minutes, 0 = none) + per-village TS/artefact/include
+    // (persisted; not parsed from the game).
+    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, maxTravelMin: 30, perVillage: {} } }; }
     var STATE = { data: blank(), units: null, controls: false, quotaWarned: false };
     function persist() {
       try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); }
@@ -152,6 +158,7 @@
       if (!Array.isArray(d.skipped)) d.skipped = [];
       if (!d.config || typeof d.config !== 'object') d.config = {};
       d.config.intervalSec = intSec(d.config.intervalSec);
+      d.config.maxTravelMin = capMin(d.config.maxTravelMin); // legacy blobs (no key) get the 30 min default
       if (!d.config.perVillage || typeof d.config.perVillage !== 'object') d.config.perVillage = {};
     }
 
@@ -333,8 +340,9 @@
       STATE.data.server = obj.server || ''; STATE.data.tribe = String(obj.tribe || 'huns').toLowerCase(); STATE.data.mapRadius = Number(obj.mapRadius) || 200;
       STATE.data.scannedAt = (typeof obj.scannedAt === 'string') ? obj.scannedAt : ''; // keep the scan freshness
       if (Array.isArray(obj.skipped)) STATE.data.skipped = obj.skipped.filter(function (k) { return typeof k === 'string'; }); // round-trip skips
-      if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + per-village TS/artefact/include
+      if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + travel cap + per-village TS/artefact/include
         STATE.data.config.intervalSec = intSec(obj.config.intervalSec);
+        STATE.data.config.maxTravelMin = capMin(obj.config.maxTravelMin);
         if (obj.config.perVillage && typeof obj.config.perVillage === 'object') STATE.data.config.perVillage = obj.config.perVillage;
       }
       obj.villages.forEach(function (v) {
@@ -368,6 +376,7 @@
       persist();
       if (!STATE.controls) { renderTribeSel(); renderRes(); }
       $('gIntSec').value = STATE.data.config.intervalSec; // global sending interval (seconds)
+      $('gMaxTravel').value = STATE.data.config.maxTravelMin; // global travel cap (minutes, 0 = none)
       $('tribeSel').value = tribe;
       $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>';
       if (STATE.data.villages.length) {
@@ -447,6 +456,7 @@
     document.addEventListener('input', function (ev) {
       var t = ev.target; if (!t || !t.classList) return;
       if (t.id === 'gIntSec') { STATE.data.config.intervalSec = intSec(t.value); persist(); return; }
+      if (t.id === 'gMaxTravel') { STATE.data.config.maxTravelMin = capMin(t.value); persist(); return; }
       var tr = t.closest && t.closest('tr[data-did]'); if (!tr) return;
       var did = tr.getAttribute('data-did');
       if (t.classList.contains('vtr')) {
@@ -481,7 +491,8 @@
         var ts = Number(tr.querySelector('.vts').value), ar = Number(tr.querySelector('.vart').value);
         perVillage[did] = { ts: (isFinite(ts) && ts >= 0) ? ts : 0, interval: intervalMin, artefact: (isFinite(ar) && ar > 0) ? ar : 1 };
       });
-      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage, skipped: STATE.data.skipped };
+      return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage, skipped: STATE.data.skipped,
+               maxTravelMin: capMin($('gMaxTravel').value) }; // travel cap (minutes; 0 -> falsy -> no cap in buildInstance)
     }
 
     // ── run ──
@@ -492,7 +503,9 @@
       if (!cfg.includedDids.length) { alert('Include at least one village.'); return; }
       var inst = PVE.buildInstance(STATE.data, cfg);
       if (!inst.villages.some(function (v) { return v.budget > 0; })) { alert('Every selected village has budget 0 — type cavalry counts in the table (or send a troops page).'); return; }
-      var result = PVE.solve(inst, { solver: getSolver(), maxExactPairs: 1500 });
+      // maxExactPairs 50 = measured jsLPSolver cliff (62 pairs already takes 15 s and would eat
+      // the whole timeout); bigger instances go straight to the best-of-two greedy (near-optimal).
+      var result = PVE.solve(inst, { solver: getSolver(), maxExactPairs: 50, exactTimeoutMs: 10000 });
       var rows = PVE.planDiff(STATE.data, inst, result, STATE.data.skipped);
       STATE.lastRun = { inst: inst, result: result, rows: rows }; // for skip/unskip re-decoration before re-run
       renderResults(inst, result, rows);
@@ -509,7 +522,9 @@
       ];
       if (skipN) cards.push({ k: 'Skipped', v: skipN });
       $('cards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('') + (over ? '<div class="card warn"><div class="v">⚠</div><div class="k">over 20,000 movement cap</div></div>' : '');
-      $('methodLine').innerHTML = 'Method: <b>' + esc(result.method) + '</b>. Per-village rainbows used: ' + inst.villages.map(function (v, i) { return esc(v.name) + ' ' + result.used[i] + '/' + v.budget; }).join(' · ');
+      $('methodLine').innerHTML = 'Method: <b>' + esc(result.method) + '</b>. '
+        + (inst.maxTravelMin ? 'Travel cap: ' + inst.maxTravelMin + ' min one-way. ' : '<span class="err">No travel cap — far oases may be assigned.</span> ')
+        + 'Per-village rainbows used: ' + inst.villages.map(function (v, i) { return esc(v.name) + ' ' + result.used[i] + '/' + v.budget; }).join(' · ');
       var counts = { add: 0, move: 0, keep: 0, remove: 0 };
       rows.forEach(function (r) { counts[r.status]++; });
       $('diffFilters').innerHTML = ['add', 'move', 'keep', 'remove'].map(function (s) { return '<label class="chk on" data-st="' + s + '"><input type="checkbox" checked> ' + s + ' <span class="muted">' + counts[s] + '</span></label>'; }).join('');
@@ -615,7 +630,7 @@
     $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
     $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
     $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
-    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('gIntSec').value = 300; renderTribeSel(); status('Cleared.'); });
+    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('gIntSec').value = 300; $('gMaxTravel').value = 30; renderTribeSel(); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
 
@@ -639,6 +654,7 @@
     // ── boot ──
     restore();
     $('gIntSec').value = STATE.data.config.intervalSec;
+    $('gMaxTravel').value = STATE.data.config.maxTravelMin;
     renderTribeSel(); renderRes();
     $('tribeSel').addEventListener('change', onTribeChange); // bound once
     if (STATE.data.villages.length || STATE.data.oases.length) applyData('Restored your last session.'); else status('Waiting for data… (Scan oases + Send page from the collector, or Import a file.)');
