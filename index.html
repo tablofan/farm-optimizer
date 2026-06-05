@@ -103,6 +103,20 @@
       <div class="scroll"><table id="vilTable"></table></div>
     </div>
 
+    <!-- 4. Oasis browser -->
+    <div class="section hidden" id="secBrowse">
+      <div class="section-title">4 · Oasis browser <span class="muted" style="text-transform:none;letter-spacing:0">— free oases around one village, nearest first; independent of the optimizer</span></div>
+      <div class="row">
+        <span class="muted">Village:</span> <select id="brVil"></select>
+        <span class="muted">Distance (fields)</span>
+        <input type="number" id="brMin" value="0" min="0" step="1"> <span class="muted">to</span>
+        <input type="number" id="brMax" value="30" min="0" step="1">
+        <span class="muted" id="brCount"></span>
+      </div>
+      <div class="row" id="brRes" style="margin-top:10px"></div>
+      <div class="scroll" style="margin-top:10px"><table id="brTable"></table></div>
+    </div>
+
     <!-- Optimize -->
     <div class="section hidden" id="secRun">
       <div class="row">
@@ -111,9 +125,9 @@
       </div>
     </div>
 
-    <!-- 4. Results -->
+    <!-- 5. Results -->
     <div class="section hidden" id="secRes">
-      <div class="section-title">4 · Plan</div>
+      <div class="section-title">5 · Plan</div>
       <div class="cards" id="cards"></div>
       <div class="row" id="diffFilters" style="margin:10px 0"></div>
       <div class="scroll"><div id="diffTable"></div></div>
@@ -392,6 +406,10 @@
         renderVillages();
         ['secCfg', 'secVil', 'secRun'].forEach(function (s) { $(s).classList.remove('hidden'); });
       }
+      if (STATE.data.villages.length && STATE.data.oases.length) { // browser needs both
+        renderBrowseControls(); renderBrowse();
+        $('secBrowse').classList.remove('hidden');
+      }
     }
 
     // ── tribe / cavalry / resource controls ──
@@ -420,16 +438,19 @@
       if (selectedSlots().length > 3) { ev.target.checked = false; alert('Pick at most 3 cavalry types.'); return; }
       lab.classList.toggle('on', ev.target.checked); renderVillages();
     }
-    function renderRes() {
-      var row = $('resRow'); row.innerHTML = '';
+    function renderResRow(rowEl, onChange) {
+      rowEl.innerHTML = '';
       PVE.RES.forEach(function (r) {
         var lab = el('label', { class: 'chk on', 'data-res': r });
         lab.innerHTML = '<input type="checkbox" checked> <span class="' + resClass(r) + '">' + r + '</span>';
-        lab.querySelector('input').addEventListener('change', function (ev) { lab.classList.toggle('on', ev.target.checked); });
-        row.appendChild(lab);
+        lab.querySelector('input').addEventListener('change', function (ev) { lab.classList.toggle('on', ev.target.checked); if (onChange) onChange(); });
+        rowEl.appendChild(lab);
       });
     }
-    function resourceFilter() { var f = {}; Array.prototype.forEach.call($('resRow').querySelectorAll('label'), function (l) { f[l.getAttribute('data-res')] = l.querySelector('input').checked; }); return f; }
+    // optimizer filter + the browser's own (independent state, same bucketing rule)
+    function renderRes() { renderResRow($('resRow')); renderResRow($('brRes'), renderBrowse); }
+    function resFilterOf(rowEl) { var f = {}; Array.prototype.forEach.call(rowEl.querySelectorAll('label'), function (l) { f[l.getAttribute('data-res')] = l.querySelector('input').checked; }); return f; }
+    function resourceFilter() { return resFilterOf($('resRow')); }
 
     // ── per-village table (editable troop counts) ──
     function villageByDid(did) { for (var i = 0; i < STATE.data.villages.length; i++) if (STATE.data.villages[i].did == did) return STATE.data.villages[i]; return null; }
@@ -549,6 +570,29 @@
       });
       return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage, skipped: STATE.data.skipped,
                maxTravelMin: capMin($('gMaxTravel').value) }; // travel cap (minutes; 0 -> falsy -> no cap in buildInstance)
+    }
+
+    // ── oasis browser (read-only; see CONTEXT.md — distance band, nearest-first) ──
+    function renderBrowseControls() {
+      var sel = $('brVil'), cur = sel.value;
+      sel.innerHTML = '';
+      STATE.data.villages.forEach(function (v) {
+        var o = document.createElement('option'); o.value = v.did; o.textContent = v.name + ' (' + v.x + '|' + v.y + ')'; sel.appendChild(o);
+      });
+      if (cur && STATE.data.villages.some(function (v) { return String(v.did) === cur; })) sel.value = cur; // keep selection across re-renders
+    }
+    function renderBrowse() {
+      if (!STATE.data.villages.length || !STATE.data.oases.length) return;
+      var mn = Number($('brMin').value); if (!isFinite(mn) || mn < 0) mn = 0;
+      var mxRaw = $('brMax').value, mx = mxRaw === '' ? Infinity : Number(mxRaw); if (isNaN(mx) || mx < 0) mx = Infinity; // empty/invalid max = no cap
+      var rows = PVE.browseOases(STATE.data, { did: Number($('brVil').value), minDist: mn, maxDist: mx, resourceFilter: resFilterOf($('brRes')) });
+      $('brCount').textContent = rows.length + (rows.length === 1 ? ' oasis' : ' oases');
+      var head = '<tr><th>Oasis</th><th>Distance</th><th>Type</th><th>In farm list</th></tr>';
+      var body = rows.map(function (r) {
+        var lists = r.farmLists.map(function (l) { return '<span title="' + esc(l.village) + '">' + esc(l.name) + '</span>'; }).join(', ');
+        return '<tr><td>' + mapLink(r.x, r.y) + '</td><td>' + r.dist.toFixed(1) + '</td><td>' + typeLabel(r.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
+      }).join('');
+      $('brTable').innerHTML = head + (body || '<tr><td colspan="4" class="muted">No free oases in this distance band / filter.</td></tr>');
     }
 
     // ── run ──
@@ -696,9 +740,12 @@
     $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
     $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
     $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
-    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('gIntSec').value = 300; $('gMaxTravel').value = 30; renderTribeSel(); status('Cleared.'); });
+    $('btnClear').addEventListener('click', function () { STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse'].forEach(function (s) { $(s).classList.add('hidden'); }); $('cavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('gMaxTravel').value = 30; renderTribeSel(); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
+    $('brVil').addEventListener('change', renderBrowse);
+    $('brMin').addEventListener('input', renderBrowse);
+    $('brMax').addEventListener('input', renderBrowse);
 
     // ── collector hand-off (postMessage) ──
     function isGameOrigin(o) { try { return /(^|\.)travian\.[a-z.]+$/i.test(new URL(o).hostname); } catch (e) { return false; } } // suffix, not prefix

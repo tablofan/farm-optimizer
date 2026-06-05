@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<!-- Headless e2e smoke test (see DOCS.md "Develop / test"). Iframes the calculator on the same
+     origin, posts sample-data.json via the tests-allowed postMessage path, and asserts the Oasis
+     browser + optimizer UI behave. Output: SMOKE-OK / SMOKE-FAIL lines in #out. -->
+<html><head><meta charset="UTF-8"></head><body>
+<iframe id="f" src="index.html" style="width:1200px;height:2000px"></iframe>
+<pre id="out"></pre>
+<script>
+const out = [];
+function log(ok, name, extra) { out.push((ok ? 'SMOKE-OK   ' : 'SMOKE-FAIL ') + name + (extra ? ' — ' + extra : '')); }
+const tick = ms => new Promise(r => setTimeout(r, ms));
+window.addEventListener('load', async () => {
+  try {
+    const f = document.getElementById('f');
+    const W = f.contentWindow, D = f.contentDocument;
+    W.localStorage.removeItem('pveData');
+    const data = await fetch('sample-data.json').then(r => r.json());
+    W.postMessage(data, '*'); // legacy full payload -> loadData (same-origin allowed for tests)
+    await tick(500);
+    const $ = id => D.getElementById(id);
+
+    log(!$('secBrowse').classList.contains('hidden'), 'browser section visible after data');
+    log(/5 · Plan/.test($('secRes').textContent), 'Plan renumbered to 5');
+    const opts = $('brVil').options;
+    log(opts.length === 3, 'village dropdown has all 3 villages', 'got ' + opts.length);
+    log(/A001 \(-18\|-93\)/.test(opts[0].textContent), 'dropdown label is "name (x|y)"', opts[0].textContent);
+
+    let rows = $('brTable').querySelectorAll('tr');
+    let dists = Array.prototype.slice.call(rows, 1).map(tr => parseFloat(tr.cells[1].textContent));
+    log(dists.length > 0 && dists.every(d => d <= 30), 'default band 0–30 respected', 'first: ' + JSON.stringify(dists.slice(0, 4)));
+    log(dists.every((d, i) => i === 0 || dists[i - 1] <= d), 'sorted nearest-first');
+    log(($('brCount').textContent || '').indexOf(String(dists.length)) === 0, 'count label matches rows', $('brCount').textContent);
+    const memRow = Array.prototype.find.call(rows, tr => tr.cells && tr.cells.length > 3 && /-8\|-116/.test(tr.cells[0].textContent));
+    log(!!memRow && /A001 oases/.test(memRow.cells[3].textContent), 'farm-list membership shown for -8|-116', memRow && memRow.cells[3].textContent);
+
+    // empty max -> no cap (all unique sample oases)
+    $('brMax').value = '';
+    $('brMax').dispatchEvent(new W.Event('input', { bubbles: true }));
+    await tick(100);
+    rows = $('brTable').querySelectorAll('tr');
+    log(rows.length - 1 === data.oases.length, 'empty max lists ALL oases', (rows.length - 1) + ' vs ' + data.oases.length);
+
+    // inverted band -> empty state, no crash
+    $('brMin').value = '30'; $('brMax').value = '20';
+    $('brMin').dispatchEvent(new W.Event('input', { bubbles: true }));
+    await tick(100);
+    log(/No free oases/.test($('brTable').textContent), 'inverted band shows empty-state row');
+
+    // crop-only browser filter: primary-bucket rule (clay+crop doubles hidden)
+    $('brMin').value = '0'; $('brMax').value = '30';
+    $('brMax').dispatchEvent(new W.Event('input', { bubbles: true }));
+    await tick(50);
+    $('brRes').querySelectorAll('label').forEach(l => {
+      const c = l.querySelector('input');
+      if (l.getAttribute('data-res') !== 'crop' && c.checked) c.click();
+    });
+    await tick(100);
+    rows = $('brTable').querySelectorAll('tr');
+    const types = Array.prototype.slice.call(rows, 1).map(tr => tr.cells[2].textContent);
+    log(types.length > 0 && types.every(t => /crop/.test(t) && !/clay|wood|iron/.test(t)), 'crop-only filter follows primary-bucket rule', JSON.stringify(types.slice(0, 3)));
+    const optAll = Array.prototype.every.call($('resRow').querySelectorAll('input'), i => i.checked);
+    log(optAll, 'optimizer filter state untouched by browser filter');
+
+    // switch village -> re-render, distances change
+    $('brVil').value = String(data.villages[2].did);
+    $('brVil').dispatchEvent(new W.Event('change', { bubbles: true }));
+    await tick(100);
+    rows = $('brTable').querySelectorAll('tr');
+    dists = Array.prototype.slice.call(rows, 1).map(tr => parseFloat(tr.cells[1].textContent));
+    log(dists.every((d, i) => i === 0 || dists[i - 1] <= d), 'village switch re-renders sorted');
+
+    // optimizer still runs end-to-end after the refactor (greedy at minimum)
+    W.document.getElementById('btnRun').click();
+    await tick(800);
+    log(!$('secRes').classList.contains('hidden') && /Oases farmed/.test($('cards').textContent), 'Optimise still works after refactor', $('cards').textContent.slice(0, 40));
+  } catch (e) {
+    log(false, 'EXCEPTION', e && (e.message + ' @ ' + (e.stack || '').split('\n')[1]));
+  }
+  document.getElementById('out').textContent = out.join('\n');
+  document.title = 'SMOKE-DONE';
+});
+</script></body></html>
