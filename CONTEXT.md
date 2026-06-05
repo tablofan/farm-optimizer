@@ -41,6 +41,13 @@ map (`karte.php?x=…&y=…`). Removals are tagged with a reason: over capacity,
 filter, **out of range** (beyond the **Travel cap**, or costlier than every village's **Capacity**),
 duplicate, or **skipped** (a currently-farmed **Skipped oasis**).
 
+**Oasis browser**:
+A read-only view in the **Calculator** for browsing a single **Village**'s surroundings: all free
+**Oases** within a **Distance** band of that village, always ordered nearest-first, filterable by
+**Oasis type**. Independent of the optimizer — it needs no **Cavalry** selection and no plan; it
+answers "what is around this village?", not "what should I farm?".
+_Avoid_: oasis explorer, nearby oases (use only descriptively).
+
 **Oasis type**:
 The resource bonus an oasis carries (e.g. +25% lumber, +50% crop, or a double-bonus). Scraped
 per-oasis alongside coordinates. For filtering it collapses to one of the **4 resources** by its
@@ -95,7 +102,7 @@ _Avoid_: max distance (the cap is on time, not fields — TS/artefact shift the 
 Straight-line (Euclidean) map distance in fields between a village and an oasis, computed from their
 coordinates. This world's map runs **−200..+200** on both axes (≈401 wide) and wraps (torus), so each
 axis delta is wrap-capped — `d = min(|Δ|, 401 − |Δ|)` — before applying Pythagoras.
-_Avoid_: travel length (Excel term — that was distance), range.
+_Avoid_: travel length, squares / sq (Excel terms — both meant distance), range.
 
 **Tournament Square (TS)**:
 A village building that increases travel speed for the portion of a trip beyond 20 fields.

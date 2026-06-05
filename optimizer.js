@@ -374,13 +374,55 @@
     };
   }
 
+  // ── Oasis browser query (read-only; see CONTEXT.md "Oasis browser") ─
+  // All free oases within an inclusive Distance band of one village, nearest-first.
+  // Independent of cavalry/optimizer config — pure geometry + the same primary-bucket
+  // resource rule as the optimizer. opts: { did, minDist, maxDist, resourceFilter }.
+  // Each row carries the current farm lists targeting that tile (membership display).
+  function browseOases(data, opts) {
+    opts = opts || {};
+    var village = null;
+    (data.villages || []).forEach(function (v) { if (v.did == opts.did) village = v; });
+    if (!village) return [];
+    var radius = data.mapRadius != null ? data.mapRadius : 200;
+    var minD = (opts.minDist != null && isFinite(opts.minDist) && opts.minDist > 0) ? opts.minDist : 0;
+    var maxD = (opts.maxDist != null && !isNaN(opts.maxDist) && opts.maxDist >= 0) ? opts.maxDist : Infinity;
+    var filter = opts.resourceFilter || { wood: true, clay: true, iron: true, crop: true };
+
+    var vName = {};
+    (data.villages || []).forEach(function (v) { vName[v.did] = v.name; });
+    var listsByKey = {};
+    (data.farmLists || []).forEach(function (l) {
+      var tseen = {};
+      (l.targets || []).forEach(function (t) {
+        var k = t.x + '|' + t.y;
+        if (tseen[k]) return; tseen[k] = 1; // a list targeting a tile twice is one membership
+        (listsByKey[k] || (listsByKey[k] = [])).push({ name: l.name, village: l.villageName || vName[l.villageDid] || '' });
+      });
+    });
+
+    var seen = {};
+    var rows = [];
+    (data.oases || []).forEach(function (o) {
+      var k = o.x + '|' + o.y;
+      if (seen[k]) return; seen[k] = 1; // dedupe by tile (as in buildInstance)
+      var res = primaryRes(o.bonuses);
+      if (!res || !filter[res]) return; // same bucketing as the optimizer (clay+crop -> clay)
+      var d = distance(o.x, o.y, village.x, village.y, radius);
+      if (d < minD || d > maxD) return; // inclusive band on the float distance
+      rows.push({ x: o.x, y: o.y, bonuses: o.bonuses, res: res, dist: d, farmLists: listsByKey[k] || [] });
+    });
+    rows.sort(function (a, b) { return (a.dist - b.dist) || (a.x - b.x) || (a.y - b.y); });
+    return rows;
+  }
+
   // ── exports ────────────────────────────────────────────────────────
   var PVE = {
     axisSize: axisSize, torusDelta: torusDelta, distance: distance,
     travelMinutes: travelMinutes, oasisCost: oasisCost, primaryRes: primaryRes, RES: RES,
     buildInstance: buildInstance, greedy: greedy, greedyPairs: greedyPairs, bestGreedy: bestGreedy,
     solveExact: solveExact, solve: solve,
-    planDiff: planDiff
+    planDiff: planDiff, browseOases: browseOases
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = PVE;
   root.PVE = PVE;

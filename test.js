@@ -410,5 +410,67 @@ t('bestGreedy never returns the worse construction (and ties break to fewer move
   }
 });
 
+console.log('oasis browser');
+t('band is inclusive on the float distance; rows sorted nearest-first', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }],
+    oases: [ { x: 3, y: 4, bonuses: [{res:'crop',pct:50}] },   // dist exactly 5 (max bound)
+             { x: 0, y: 2, bonuses: [{res:'wood',pct:25}] },   // dist exactly 2 (min bound)
+             { x: 0, y: 6, bonuses: [{res:'iron',pct:25}] },   // dist 6 — outside band
+             { x: 1, y: 0, bonuses: [{res:'clay',pct:25}] } ], // dist 1 — outside band
+    farmLists: [] };
+  const rows = PVE.browseOases(data, { did: 1, minDist: 2, maxDist: 5,
+    resourceFilter: { wood: true, clay: true, iron: true, crop: true } });
+  assert.deepStrictEqual(rows.map(r => [r.x, r.y]), [[0, 2], [3, 4]]); // both bounds inclusive, sorted
+  approx(rows[0].dist, 2); approx(rows[1].dist, 5);
+});
+t('browser distance is torus-wrapped like everything else', () => {
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 200, y: 0, troops: {} }],
+    oases: [{ x: -200, y: 0, bonuses: [{res:'crop',pct:25}] }], farmLists: [] };
+  const rows = PVE.browseOases(data, { did: 1, minDist: 0, maxDist: 30 });
+  assert.strictEqual(rows.length, 1);
+  approx(rows[0].dist, 1); // 1 field across the wrap, not 400
+});
+t('browser filter uses the optimizer\'s primary-bucket rule (clay+crop hidden when only crop on)', () => {
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }],
+    oases: [ { x: 1, y: 0, bonuses: [{res:'clay',pct:25},{res:'crop',pct:25}] },  // buckets clay
+             { x: 2, y: 0, bonuses: [{res:'crop',pct:50}] } ], farmLists: [] };
+  const rows = PVE.browseOases(data, { did: 1,
+    resourceFilter: { wood: false, clay: false, iron: false, crop: true } });
+  assert.deepStrictEqual(rows.map(r => [r.x, r.y]), [[2, 0]]);
+});
+t('rows carry current farm-list membership; unknown village -> []', () => {
+  const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'sample-data.json')));
+  const rows = PVE.browseOases(data, { did: 1001, minDist: 0, maxDist: 30 }); // A001 (-18,-93)
+  assert(rows.length > 0, 'has rows');
+  for (let i = 1; i < rows.length; i++) assert(rows[i - 1].dist <= rows[i].dist, 'sorted by distance');
+  const listed = rows.find(r => r.x === -8 && r.y === -116);
+  assert(listed && listed.farmLists.some(l => l.name === 'A001 oases'), 'membership shown');
+  const free = rows.find(r => r.x === -19 && r.y === -89);
+  assert(free && free.farmLists.length === 0, 'unlisted oasis has no membership');
+  assert.deepStrictEqual(PVE.browseOases(data, { did: 99999 }), []);
+});
+t('duplicate tiles deduped; defaults: min 0, max unbounded, all resources', () => {
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }],
+    oases: [ { x: 1, y: 0, bonuses: [{res:'crop',pct:25}] }, { x: 1, y: 0, bonuses: [{res:'crop',pct:50}] },
+             { x: 150, y: 0, bonuses: [{res:'wood',pct:25}] } ], farmLists: [] };
+  const rows = PVE.browseOases(data, { did: 1 });
+  assert.strictEqual(rows.length, 2); // dup tile collapsed; far oasis included (no max)
+  assert.strictEqual(PVE.browseOases(data, { did: 1, maxDist: -5 }).length, 2);      // negative max = invalid = no cap
+  assert.strictEqual(PVE.browseOases(data, { did: 1, maxDist: Infinity }).length, 2); // explicit Infinity = no cap
+});
+t('membership: per-list duplicate target counted once; two lists on one tile both shown', () => {
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }, { did: 2, name: 'B', x: 5, y: 0, troops: {} }],
+    oases: [{ x: 1, y: 0, bonuses: [{res:'crop',pct:25}] }],
+    farmLists: [
+      { listId: 1, name: 'L1', villageDid: 1, targets: [{ x: 1, y: 0 }, { x: 1, y: 0 }] }, // same tile twice
+      { listId: 2, name: 'L2', villageName: 'B', villageDid: 2, targets: [{ x: 1, y: 0 }] } ] };
+  const rows = PVE.browseOases(data, { did: 1 });
+  assert.strictEqual(rows.length, 1);
+  assert.deepStrictEqual(rows[0].farmLists.map(l => l.name).sort(), ['L1', 'L2']); // dup once; both lists kept
+  assert.strictEqual(rows[0].farmLists.find(l => l.name === 'L1').village, 'A');   // village resolved via villageDid
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed' + (skipped ? ', ' + skipped + ' skipped' : ''));
 process.exit(fail ? 1 : 0);

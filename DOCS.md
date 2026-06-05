@@ -27,8 +27,11 @@ for the build plan / data contract.
    **Plan** (used/budget under the last run) columns. Shows a **display-only plan diff grouped by village**
    (keep / add / move / remove; the status toggles persist; a move stays under its *current* village tagged `→ destination`), lets
    you **skip** individual oases (a global opt-out — re-Optimise excludes them; persisted), each oasis
-   linking to the in-game map. Import accepts a saved page (`.htm`), an **oases-only file** (merged in,
-   keeping villages/lists/config/skips), or a full JSON dataset (replaces).
+   linking to the in-game map. An **Oasis browser** section lists the free oases around any one
+   village (inclusive distance band, nearest-first, its own resource filter, current farm-list
+   membership) — independent of the optimizer, needs no cavalry counts. Import accepts a saved page
+   (`.htm`), an **oases-only file** (merged in, keeping villages/lists/config/skips), or a full JSON
+   dataset (replaces).
 
    *Why send the page, not the map?* Villages/farm-lists/troops all live on one rendered page each
    (Send page captures them). The **map** doesn't: it renders as raster image tiles with no per-tile
@@ -40,7 +43,7 @@ for the build plan / data contract.
 | File | Purpose |
 |------|---------|
 | `index.html` | Calculator UI + wiring (imports the data, runs the optimizer, renders the plan diff). |
-| `optimizer.js` | Pure core logic — torus distance, travel/cost model, greedy + exact-ILP solver, plan diff. Loadable in browser and Node. |
+| `optimizer.js` | Pure core logic — torus distance, travel/cost model, greedy + exact-ILP solver, plan diff, oasis-browser query. Loadable in browser and Node. |
 | `cavalry.js` | Per-tribe unit table (name / type / speed / carry), `t1..t10` slot mapping. |
 | `collector.user.js` | Tampermonkey collector userscript. |
 | `sample-data.json` | Sample dataset to try the calculator without the game. |
@@ -74,6 +77,9 @@ for the build plan / data contract.
 ```sh
 node test.js                 # unit tests for the core logic
 python3 -m http.server 8731  # then open http://localhost:8731/index.html, click "Load sample data"
+# headless e2e (needs Chrome): serves the calculator, posts sample data, checks the UI
+google-chrome --headless=new --disable-gpu --virtual-time-budget=10000 \
+  --dump-dom http://localhost:8731/smoke-test.html | grep -E 'SMOKE-(OK|FAIL)'
 ```
 
 (Open via a local server so `fetch('sample-data.json')` works; or use "Import JSON file".)
