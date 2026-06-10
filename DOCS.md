@@ -1,6 +1,9 @@
 # Farm Optimizer
 
-A browser tool for planning farming in Travian (x3 speed, T4.6). Two optimizers share one dataset:
+A browser tool for planning farming in Travian (x3 speed, T4.6). Hosted at
+<https://tablofan.github.io/farm-optimizer/> (GitHub Pages, repo root — the collector defaults to
+it; install the collector from
+<https://tablofan.github.io/farm-optimizer/collector.user.js>). Two optimizers share one dataset:
 
 - **Oasis optimizer** — maximizes the total number of free oases farmed across your Role-pve
   villages: each oasis assigned to at most one village, within each village's cavalry capacity.

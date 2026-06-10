@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Farm Optimizer — Collector
-// @namespace    https://github.com/ren/pve-optimizer
-// @version      0.7.0
+// @namespace    https://github.com/tablofan/farm-optimizer
+// @version      0.7.1
 // @description  Scan all free oases (map API) on a Travian T4.6 gameworld and send them (or download them as a file) — plus the current page's HTML — to the Farm Optimizer calculator, which does the parsing.
 // @match        *://*.travian.com/*
 // @run-at       document-idle
 // @grant        none
+// @downloadURL  https://tablofan.github.io/farm-optimizer/collector.user.js
+// @updateURL    https://tablofan.github.io/farm-optimizer/collector.user.js
 // ==/UserScript==
 //
 // Runs IN PAGE CONTEXT (no @grant) so same-origin fetch carries your session cookie.
@@ -21,8 +23,10 @@
 
   var ZOOM = 3, THROTTLE_MIN = 500, THROTTLE_MAX = 1500; // not user-tunable
   var saved = {}; try { saved = JSON.parse(localStorage.getItem('pveCollectorCfg') || '{}') || {}; } catch (e) { saved = {}; }
+  var DEFAULT_CALC = 'https://tablofan.github.io/farm-optimizer/'; // the GitHub Pages calculator
   // `radius` is the world's half-size (−R..+R): both the scan extent AND the torus modulus sent as mapRadius.
   var CFG = Object.assign({ radius: 200, step: 30, calcUrl: '' }, saved);
+  if (!CFG.calcUrl) CFG.calcUrl = DEFAULT_CALC; // default; a saved (non-empty) URL wins
   function saveCfg() { try { localStorage.setItem('pveCollectorCfg', JSON.stringify(CFG)); } catch (e) { /* ignore */ } }
 
   var oases = []; try { oases = JSON.parse(localStorage.getItem('pveOasesCache') || '[]') || []; } catch (e) { oases = []; }
@@ -147,7 +151,7 @@
 
     var logEl = p.querySelector('#pveLog');
     function log(m) { var d = document.createElement('div'); d.textContent = m; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; }
-    function readCfg() { CFG.radius = Number(p.querySelector('#pveRad').value) || 200; CFG.step = Number(p.querySelector('#pveStep').value) || 30; CFG.calcUrl = p.querySelector('#pveCalc').value.trim(); saveCfg(); }
+    function readCfg() { CFG.radius = Number(p.querySelector('#pveRad').value) || 200; CFG.step = Number(p.querySelector('#pveStep').value) || 30; CFG.calcUrl = p.querySelector('#pveCalc').value.trim() || DEFAULT_CALC; saveCfg(); }
     p.querySelector('#pveScan').onclick = function () { readCfg(); scanOases(log); };
     p.querySelector('#pveSendO').onclick = function () { readCfg(); sendOases(log); };
     p.querySelector('#pveDlO').onclick = function () { readCfg(); downloadOases(log); };
