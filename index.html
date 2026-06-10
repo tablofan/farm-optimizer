@@ -6,7 +6,10 @@
   <title>Farm Optimizer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <!-- non-blocking font load: print media until loaded, so first paint never stalls on the CDN -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
   <style>
     :root {
       --bg: #141110; --surface: #1d1916; --inset: #15120f; --head: #201b17;
@@ -14,6 +17,7 @@
       --ink: #ece7df; --ink-dim: #b9b1a5; --ink-faint: #8e8478;
       --gold: #d9a84e; --gold-soft: #b09c72; --gold-dim: #8a7a52; --gold-ink: #1a1510;
       --ok: #97d6a0; --err: #e08a5a;
+      --fs-ui: .8125rem; --fs-cap: .7rem;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html { color-scheme: dark; }
@@ -24,19 +28,20 @@
       color: var(--ink-dim); min-height: 100vh; display: flex; justify-content: center; padding: 28px 18px;
     }
     .container { max-width: 1400px; width: 100%; }
-    h1 { text-align: center; color: var(--ink); font-size: 1.45rem; font-weight: 650; letter-spacing: -.015em; margin-bottom: 4px; }
-    .sub { text-align: center; color: var(--ink-faint); font-size: .78rem; margin-bottom: 22px; }
+    h1 { text-align: center; color: var(--ink); font-size: 1.45rem; font-weight: 600; letter-spacing: -.015em; margin-bottom: 4px; }
+    .sub { text-align: center; color: var(--ink-faint); font-size: var(--fs-cap); margin-bottom: 22px; }
     .section {
       background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
       padding: 20px 22px; margin-bottom: 14px;
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025), 0 12px 32px -20px rgba(0, 0, 0, .7);
     }
-    .section-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; color: var(--gold-soft); font-weight: 600; margin-bottom: 14px; }
+    .section-title { font-size: var(--fs-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--gold-soft); font-weight: 600; margin-bottom: 14px; }
+    .section-title .muted { font-weight: 400; display: block; margin-top: 3px; max-width: 80ch; }
     p { color: var(--ink-dim); line-height: 1.55; }
     .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .row + .row { margin-top: 10px; }
     button {
-      font: inherit; font-size: .83rem; font-weight: 500; color: var(--ink);
+      font: inherit; font-size: var(--fs-ui); font-weight: 500; color: var(--ink);
       background: #282220; border: 1px solid var(--line-strong); border-radius: 7px;
       padding: 7px 14px; cursor: pointer; transition: background .12s, border-color .12s;
     }
@@ -44,30 +49,38 @@
     button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
     button.primary { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); font-weight: 600; }
     button.primary:hover { background: #e4b966; border-color: #e4b966; }
-    button.mini { padding: 2px 10px; font-size: .72rem; border-radius: 6px; }
+    button.mini { padding: 2px 10px; font-size: var(--fs-cap); border-radius: 6px; }
+    #btnClear { background: transparent; border-color: transparent; color: var(--ink-faint); margin-left: auto; }
+    #btnClear:hover { background: transparent; border-color: var(--line-strong); color: var(--ink); }
     textarea, input[type=number], select {
-      font: inherit; font-size: .82rem; background: var(--inset); color: var(--ink);
+      font: inherit; font-size: var(--fs-ui); background: var(--inset); color: var(--ink);
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 8px;
       transition: border-color .12s, box-shadow .12s;
     }
+    select {
+      -webkit-appearance: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%238e8478' stroke-width='1.5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 9px center; padding-right: 26px;
+    }
     textarea:focus, input:focus, select:focus { border-color: var(--gold-dim); box-shadow: 0 0 0 3px rgba(217, 168, 78, .12); }
     textarea:focus:not(:focus-visible), input:focus:not(:focus-visible), select:focus:not(:focus-visible) { outline: none; }
-    textarea { width: 100%; min-height: 70px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; padding: 8px; }
+    textarea { width: 100%; min-height: 70px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-ui); padding: 8px; }
     input[type=number] { width: 70px; font-variant-numeric: tabular-nums; }
     label.chk {
       display: inline-flex; align-items: center; gap: 7px; background: var(--inset);
       border: 1px solid var(--line-strong); border-radius: 999px; padding: 5px 12px;
-      cursor: pointer; font-size: .8rem; color: var(--ink-dim); -webkit-user-select: none; user-select: none;
+      cursor: pointer; font-size: var(--fs-ui); color: var(--ink-dim); -webkit-user-select: none; user-select: none;
       transition: border-color .12s, background .12s, color .12s;
     }
     label.chk input { accent-color: var(--gold); width: 13px; height: 13px; margin: 0; }
-    label.chk:focus-within { border-color: var(--gold-dim); }
+    label.chk:hover, label.chk:focus-within { border-color: var(--gold-dim); }
     label.chk:has(input:focus-visible) { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
-    label.chk.on { border-color: var(--gold-dim); background: rgba(217, 168, 78, .08); color: var(--ink); }
-    .muted { color: var(--ink-faint); font-size: .8rem; }
-    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    label.chk.on { border-color: var(--line-strong); background: rgba(217, 168, 78, .08); color: var(--ink); }
+    label.chk.on:hover, label.chk.on:focus-within { border-color: var(--gold-dim); }
+    .muted { color: var(--ink-faint); font-size: var(--fs-ui); }
+    table { width: 100%; border-collapse: collapse; font-size: var(--fs-ui); }
     th, td { padding: 8px 10px; text-align: left; white-space: nowrap; }
-    th { font-size: .67rem; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; position: sticky; top: 0; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line-strong); z-index: 1; }
+    th { font-size: var(--fs-cap); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); font-weight: 600; position: sticky; top: 0; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line-strong); z-index: 1; }
     td { color: var(--ink); font-variant-numeric: tabular-nums; }
     tr + tr td { border-top: 1px solid var(--line); }
     tr:hover td { background: rgba(255, 255, 255, .022); }
@@ -79,46 +92,68 @@
     #vilTable th, #vilTable td { padding: 8px 5px; }
     #vilTable input.vtr { width: 62px; padding: 5px 6px; }
     input.dim { color: var(--ink-faint); }
+    /* the 65-input troop grid reads as data, not a form: borderless until hover/focus, digits right-aligned */
+    #vilTable input[type=number] { text-align: right; background: transparent; border-color: transparent; }
+    #vilTable input[type=number]:hover { border-color: var(--line-strong); }
+    #vilTable input[type=number]:focus { background: var(--inset); border-color: var(--gold-dim); }
+    /* grouped result tables share one column grid: fixed layout, header widths define the columns,
+       the last (non-.num) column absorbs slack; overflowing free text ellipsizes rather than zigzagging */
+    #diffTable .vgroup, #pvpTable .vgroup { max-width: 1100px; }
+    #brTable { max-width: 980px; }
+    #diffTable table, #pvpTable table { table-layout: fixed; }
+    #diffTable td, #pvpTable td { overflow: hidden; text-overflow: ellipsis; }
+    #diffTable th:nth-child(1), #pvpTable th:nth-child(1) { width: 84px; }
+    #diffTable th:nth-child(2), #pvpTable th:nth-child(2) { width: 110px; }
+    #diffTable th:nth-child(3) { width: 70px; }
+    #diffTable th:nth-child(4) { width: 330px; }
+    #diffTable th:nth-child(5) { width: 300px; }
+    #pvpTable th:nth-child(3) { width: 150px; }
+    #pvpTable th:nth-child(4) { width: 280px; }
+    #pvpTable th:nth-child(5) { width: 70px; }
+    #pvpTable th:nth-child(6) { width: 130px; }
+    #diffTable .t-skip th:nth-child(1) { width: 110px; }
+    #diffTable .t-skip th:nth-child(2) { width: 330px; }
+    .push { margin-left: auto; }
     .scroll { overflow: auto; max-height: 520px; scrollbar-width: thin; scrollbar-color: #383027 transparent; }
-    .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
-    .scroll::-webkit-scrollbar-thumb { background: #383027; border-radius: 5px; border: 2px solid var(--surface); }
     a { color: var(--gold-soft); text-decoration: none; }
     a:hover { color: var(--gold); text-decoration: underline; text-underline-offset: 2px; }
     .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
     .card { background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; min-width: 148px; }
-    .card .v { font-size: 1.4rem; font-weight: 650; color: var(--ink); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
-    .card .k { font-size: .65rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-faint); margin-top: 2px; }
+    .card .v { font-size: 1.4rem; font-weight: 600; color: var(--ink); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+    .card .k { font-size: var(--fs-cap); text-transform: uppercase; letter-spacing: .07em; color: var(--ink-faint); margin-top: 2px; }
     .card.warn { border-color: rgba(224, 138, 90, .4); }
     .card.warn .v { color: var(--err); }
-    .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: var(--fs-cap); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
     .b-add { background: rgba(110, 190, 120, .14); color: #a3dcab; }
     .b-keep { background: rgba(190, 170, 130, .12); color: #c4ad85; }
     .b-move { background: rgba(140, 140, 225, .15); color: #bcbcf0; }
     .b-remove { background: rgba(225, 110, 110, .13); color: #e8a8a8; }
     .label-wood { color: #b08252; } .label-clay { color: #cd7845; }
     .label-iron { color: #a8a8c2; } .label-crop { color: #c8b173; }
-    .status { font-size: .8rem; color: var(--ink-dim); margin-top: 8px; }
+    .status { font-size: var(--fs-ui); color: var(--ink-dim); margin-top: 8px; }
     .ok { color: var(--ok); } .err { color: var(--err); }
+    .callout { display: flex; gap: 8px; background: rgba(224, 138, 90, .07); border: 1px solid rgba(224, 138, 90, .25); border-radius: 8px; padding: 8px 12px; }
+    #pvpWarn .callout + .callout { margin-top: 6px; }
     .hidden { display: none; }
     .tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-    .tab-btn { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 14px; color: var(--ink-faint); font-weight: 500; margin-bottom: -1px; }
+    .tab-btn { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 14px; color: var(--ink-faint); font-weight: 600; margin-bottom: -1px; }
     .tab-btn:hover { background: transparent; border-color: transparent; color: var(--ink); }
-    .tab-btn.on { background: transparent; color: var(--ink); border-bottom-color: var(--gold); font-weight: 600; }
+    .tab-btn.on { background: transparent; color: var(--ink); border-bottom-color: var(--gold); }
     .tabpane { display: none; }
     .tabpane.on { display: block; }
     .warnchip { color: var(--err); cursor: help; margin-left: 4px; }
-    select.vrole { padding: 3px 4px; }
+    select.vrole { padding: 3px 22px 3px 8px; }
     td.short { color: var(--err); font-weight: 600; }
     .vgroup { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); }
-    .vgroup-h { font-weight: 600; font-size: .85rem; color: var(--ink); padding: 9px 12px; background: var(--head); border-bottom: 1px solid var(--line); border-radius: 9px 9px 0 0; }
+    .vgroup-h { font-weight: 600; font-size: var(--fs-ui); color: var(--ink); padding: 9px 12px; background: var(--head); border-bottom: 1px solid var(--line); border-radius: 9px 9px 0 0; }
     .vgroup tr:last-child td:first-child { border-bottom-left-radius: 9px; }
     .vgroup tr:last-child td:last-child { border-bottom-right-radius: 9px; }
     .vgroup table th { background: var(--inset); }
     tr.pending { opacity: .55; }
     .steps { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
-    .step { flex: 1 1 230px; display: flex; gap: 10px; align-items: flex-start; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; font-size: .8rem; color: var(--ink-dim); line-height: 1.5; }
+    .step { flex: 1 1 230px; display: flex; gap: 10px; align-items: flex-start; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; font-size: var(--fs-ui); color: var(--ink-dim); line-height: 1.5; }
     .step b { color: var(--ink); font-weight: 600; }
-    .step-n { flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(217, 168, 78, .14); color: var(--gold); font-size: .7rem; font-weight: 650; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+    .step-n { flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(217, 168, 78, .14); color: var(--gold); font-size: var(--fs-cap); font-weight: 600; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
   </style>
 </head>
 <body>
@@ -143,15 +178,15 @@
           <div class="step"><span class="step-n">3</span><div><b>Or import below</b> — a saved page (.htm), an oases-only file, or a full JSON dataset.</div></div>
         </div>
         <div class="row">
-          <button id="btnFile">Import file (.json / .htm)…</button>
+          <button id="btnFile" class="primary">Import file (.json / .htm)…</button>
           <input type="file" id="fileInput" accept=".json,.htm,.html,application/json,text/html" class="hidden">
           <button id="btnSample">Load sample</button>
-          <button id="btnClear">Clear data</button>
           <span class="muted">Tribe:</span> <select id="tribeSel"></select>
+          <button id="btnClear">Clear data</button>
         </div>
-        <div class="row"><textarea id="pasteBox" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
-        <div class="row"><button id="btnPaste">Load pasted</button></div>
         <div class="status" id="dataStatus">Waiting for data…</div>
+        <div class="row" style="margin-top:12px"><textarea id="pasteBox" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
+        <div class="row"><button id="btnPaste">Load pasted</button></div>
       </div>
 
       <div class="section hidden" id="secVil">
@@ -159,12 +194,13 @@
         <div class="row" style="margin-bottom:10px">
           <span class="muted">Sending interval (one value, all villages):</span>
           <input type="number" id="gIntSec" value="300" min="1" step="1"> <span class="muted">seconds</span>
-          <span class="muted" style="margin-left:18px">Apply to all villages:</span>
-          TS <input type="number" id="gTs" value="0" min="0" max="20">
-          Artefact × <input type="number" id="gArt" value="1" min="0.1" step="0.1">
+          <span class="muted push">Apply to all villages:</span>
+          <span class="muted">TS</span> <input type="number" id="gTs" value="0" min="0" max="20">
+          <span class="muted">Artefact ×</span> <input type="number" id="gArt" value="1" min="0.1" step="0.1">
           <button id="btnApplyAll">Apply</button>
         </div>
         <div class="scroll"><table id="vilTable"></table></div>
+        <p class="muted" style="margin-top:8px">Budget / Now / Plan count rainbows — one of each selected cavalry type. ⚠ marks a stored Role contradicted by the current farm lists (hover it for details).</p>
       </div>
     </div>
 
@@ -522,7 +558,8 @@
       if (!STATE.controls) { renderTribeSel(); renderRes(); }
       $('gIntSec').value = STATE.data.config.intervalSec; // global sending interval (seconds)
       $('tribeSel').value = tribe;
-      $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>';
+      $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>'
+        + (!isErr && STATE.data.villages.length ? ' <span class="muted">· next: set Roles below, then Optimise on the Oasis Optimizer tab.</span>' : '');
       if (STATE.data.villages.length) {
         if (!STATE.controls) { renderCav(); STATE.controls = true; }
         ensureRoles(); // fill default Roles (stored choices win) before the table renders
@@ -661,7 +698,7 @@
       var kinds = STATE.data.oases.length ? PVE.farmKinds(STATE.data) : {};
       var head = '<tr><th title="pve = farms oases · pvp = holds PvP farms · off = neither">Role</th><th>Village</th><th>Coords</th>';
       list.forEach(function (u) { head += '<th>' + esc(u.name.split(' ')[0]) + '</th>'; });
-      head += '<th class="num">Budget</th><th class="num" title="Rainbows the current farm lists tie up (free-oasis targets only)">Now</th>'
+      head += '<th class="num" title="The village\'s rainbow capacity — min over the selected cavalry types\' counts">Budget</th><th class="num" title="Rainbows the current farm lists tie up (free-oasis targets only)">Now</th>'
             + '<th class="num" title="Rainbows used / budget under the last Optimise run">Plan</th><th>TS</th><th>Artefact</th></tr>';
       var body = '';
       STATE.data.villages.forEach(function (v) {
@@ -881,7 +918,7 @@
       if (leftover.length) {
         var oByKey = {}; (STATE.data.oases || []).forEach(function (o) { oByKey[o.x + '|' + o.y] = o; });
         html += '<div class="vgroup"><div class="vgroup-h">Skipped <span class="muted">(' + leftover.length + ')</span></div>'
-          + '<table><tr><th>Oasis</th><th>Type</th><th></th></tr>'
+          + '<table class="t-skip"><tr><th>Oasis</th><th>Type</th><th></th></tr>'
           + leftover.map(function (k) {
             var p = k.split('|'), o = oByKey[k];
             return '<tr><td>' + mapLink(Number(p[0]), Number(p[1])) + '</td><td>' + (o ? typeLabel(o.bonuses) : '<span class="muted">—</span>')
@@ -933,7 +970,7 @@
       }
       if (inst.excluded.noComp.length) warns.push(inst.excluded.noComp.length + ' farm(s) without a readable troop comp (or hero-only) — re-send the farm-list page; entries are budgeted by their configured send.');
       if (inst.heroDropped) warns.push('Hero ignored on ' + inst.heroDropped + ' send(s) — travel and budget are computed from the rest of the comp (his speed depends on untracked gear).');
-      $('pvpWarn').innerHTML = warns.map(function (w) { return '<div class="status err">⚠ ' + w + '</div>'; }).join('');
+      $('pvpWarn').innerHTML = warns.map(function (w) { return '<div class="status err callout">⚠ ' + w + '</div>'; }).join('');
       // cards (the 20,000 movement cap is account-wide: warn on oasis + PvP combined)
       var combined = result.movements + (STATE.lastRun ? STATE.lastRun.result.movements : 0);
       var cards = [
@@ -1013,7 +1050,9 @@
       if (TAB_IDS.indexOf(t) < 0) t = 'data';
       TAB_IDS.forEach(function (x) { $('tab-' + x).classList.toggle('on', x === t); });
       Array.prototype.forEach.call($('tabBar').querySelectorAll('.tab-btn'), function (b) {
-        b.classList.toggle('on', b.getAttribute('data-tab') === t);
+        var on = b.getAttribute('data-tab') === t;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-current', on ? 'true' : 'false');
       });
       if (STATE.data.config.activeTab !== t) { STATE.data.config.activeTab = t; persist(); }
     }
