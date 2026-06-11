@@ -97,17 +97,19 @@
     #vilTable input[type=number]:hover { border-color: var(--line-strong); }
     #vilTable input[type=number]:focus { background: var(--inset); border-color: var(--gold-dim); }
     /* grouped result tables share one column grid: fixed layout, header widths define the columns,
-       the last (non-.num) column absorbs slack; overflowing free text ellipsizes rather than zigzagging */
-    #diffTable .vgroup, #pvpTable .vgroup { max-width: 1100px; }
-    #brTable { max-width: 980px; }
-    #mpTable .vgroup { max-width: 980px; }
-    #diffTable table, #pvpTable table { table-layout: fixed; }
-    #diffTable td, #pvpTable td { overflow: hidden; text-overflow: ellipsis; }
+       the last (non-.num) column absorbs slack; overflowing free text ellipsizes rather than
+       zigzagging. No max-width — result tables fill their section block. */
+    #diffTable table, #pvpTable table, #mpTable table, #brTable { table-layout: fixed; }
+    #diffTable td, #pvpTable td, #mpTable td, #brTable td { overflow: hidden; text-overflow: ellipsis; }
     #diffTable th:nth-child(1), #pvpTable th:nth-child(1) { width: 84px; }
     #diffTable th:nth-child(2), #pvpTable th:nth-child(2) { width: 110px; }
     #diffTable th:nth-child(3) { width: 70px; }
     #diffTable th:nth-child(4) { width: 330px; }
     #diffTable th:nth-child(5) { width: 300px; }
+    /* planner + browser share the same column grid as the diff: coords 110, numerics 70, Type 330 */
+    #mpTable th:nth-child(1), #brTable th:nth-child(1) { width: 110px; }
+    #mpTable th:nth-child(2), #mpTable th:nth-child(3), #brTable th:nth-child(2) { width: 70px; }
+    #mpTable th:nth-child(4), #brTable th:nth-child(3) { width: 330px; }
     #pvpTable th:nth-child(3) { width: 150px; }
     #pvpTable th:nth-child(4) { width: 280px; }
     #pvpTable th:nth-child(5) { width: 70px; }
@@ -147,6 +149,13 @@
     td.short { color: var(--err); font-weight: 600; }
     .vgroup { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); }
     .vgroup-h { font-weight: 600; font-size: var(--fs-ui); color: var(--ink); padding: 9px 12px; background: var(--head); border-bottom: 1px solid var(--line); border-radius: 9px 9px 0 0; }
+    /* village groups are <details>: click the header to collapse (state survives filter re-renders) */
+    details.vgroup > summary { cursor: pointer; list-style: none; -webkit-user-select: none; user-select: none; }
+    details.vgroup > summary::-webkit-details-marker { display: none; }
+    details.vgroup > summary::before { content: '▾'; display: inline-block; width: 16px; color: var(--ink-faint); }
+    details.vgroup:not([open]) > summary::before { content: '▸'; }
+    details.vgroup:not([open]) > summary.vgroup-h { border-radius: 9px; border-bottom: none; }
+    details.vgroup > summary:hover { background: #262019; }
     .vgroup tr:last-child td:first-child { border-bottom-left-radius: 9px; }
     .vgroup tr:last-child td:last-child { border-bottom-right-radius: 9px; }
     .vgroup table th { background: var(--inset); }
@@ -245,7 +254,7 @@
           <span class="muted" id="brCount"></span>
         </div>
         <div class="row" id="brRes" style="margin-top:10px"></div>
-        <div class="scroll" style="margin-top:10px"><table id="brTable"></table></div>
+        <div class="scroll" style="margin-top:10px"><div class="vgroup"><table id="brTable"></table></div></div>
       </div>
     </div>
 
@@ -853,7 +862,7 @@
       var mxRaw = $('brMax').value, mx = mxRaw === '' ? Infinity : Number(mxRaw); if (isNaN(mx) || mx < 0) mx = Infinity; // empty/invalid max = no cap
       var rows = PVE.browseOases(STATE.data, { did: Number($('brVil').value), minDist: mn, maxDist: mx, resourceFilter: resFilterOf($('brRes')) });
       $('brCount').textContent = rows.length + (rows.length === 1 ? ' oasis' : ' oases');
-      var head = '<tr><th>Oasis</th><th class="num">Distance</th><th>Type</th><th>In farm list</th></tr>';
+      var head = '<tr><th>Oasis</th><th class="num">Dist</th><th>Type</th><th>In farm list</th></tr>';
       var body = rows.map(function (r) {
         var lists = r.farmLists.map(function (l) { return '<span title="' + esc(l.village) + '">' + esc(l.name) + '</span>'; }).join(', ');
         return '<tr><td>' + mapLink(r.x, r.y) + '</td><td class="num">' + r.dist.toFixed(1) + '</td><td>' + typeLabel(r.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
@@ -943,8 +952,20 @@
         + '<td>' + mapLink(r.x, r.y) + '</td><td class="muted num">' + (d == null ? '—' : d.toFixed(1)) + '</td><td>' + typeLabel(r.bonuses) + '</td>'
         + '<td class="muted">' + rowDetail(r) + note + '</td><td>' + ctrl + '</td></tr>';
     }
+    // collapse state of the village groups (details.vgroup), keyed by data-g — read back before a
+    // re-render so filter toggles and re-runs keep what the player collapsed; new groups default open.
+    function openStates(rootEl) {
+      var m = {};
+      rootEl.querySelectorAll('details.vgroup[data-g]').forEach(function (d) { m[d.getAttribute('data-g')] = d.open; });
+      return m;
+    }
+    function vgroupTag(states, g, headHtml) {
+      return '<details class="vgroup" data-g="' + esc(String(g)) + '"' + (states[String(g)] === false ? '' : ' open')
+        + '><summary class="vgroup-h">' + headHtml + '</summary>';
+    }
     function drawDiff(rows) {
       var show = {}; Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) { show[l.getAttribute('data-st')] = l.querySelector('input').checked; });
+      var wasOpen = openStates($('diffTable'));
       var ord = {}, nameByDid = {}; STATE.data.villages.forEach(function (v, i) { ord[v.did] = i; nameByDid[v.did] = v.name; });
       var statusOrder = { add: 0, move: 1, keep: 2, remove: 3 };
       var groups = {}, names = [], shownKeys = {};
@@ -959,22 +980,22 @@
       names.forEach(function (g) {
         var label = nameByDid[g]; if (label == null) label = '—';
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
-        html += '<div class="vgroup"><div class="vgroup-h">' + esc(label) + ' <span class="muted">(' + list.length + ')</span></div>'
+        html += vgroupTag(wasOpen, g, esc(label) + ' <span class="muted">(' + list.length + ')</span>')
           + '<table><tr><th>Action</th><th>Oasis</th><th class="num">Dist</th><th>Type</th><th>Detail</th><th></th></tr>'
-          + list.map(rowHtml).join('') + '</table></div>';
+          + list.map(rowHtml).join('') + '</table></details>';
       });
       // "Skipped": every skipped oasis not already shown as a visible row above (genuinely not farmed,
       // OR hidden by a status filter) — guarantees each skip is reachable with an unskip exactly once.
       var leftover = (STATE.data.skipped || []).filter(function (k) { return !shownKeys[k]; });
       if (leftover.length) {
         var oByKey = {}; (STATE.data.oases || []).forEach(function (o) { oByKey[o.x + '|' + o.y] = o; });
-        html += '<div class="vgroup"><div class="vgroup-h">Skipped <span class="muted">(' + leftover.length + ')</span></div>'
+        html += vgroupTag(wasOpen, 'skipped', 'Skipped <span class="muted">(' + leftover.length + ')</span>')
           + '<table class="t-skip"><tr><th>Oasis</th><th>Type</th><th></th></tr>'
           + leftover.map(function (k) {
             var p = k.split('|'), o = oByKey[k];
             return '<tr><td>' + mapLink(Number(p[0]), Number(p[1])) + '</td><td>' + (o ? typeLabel(o.bonuses) : '<span class="muted">—</span>')
               + '</td><td><button class="mini unskip" data-key="' + esc(k) + '">unskip</button></td></tr>';
-          }).join('') + '</table></div>';
+          }).join('') + '</table></details>';
       }
       $('diffTable').innerHTML = html || '<p class="muted">No rows for the selected filters.</p>';
     }
@@ -1077,9 +1098,10 @@
       });
       dids.sort(function (a, b) { var oa = ord[a] == null ? 1e9 : ord[a], ob = ord[b] == null ? 1e9 : ord[b]; return (oa - ob) || String(a).localeCompare(String(b)); });
       var html = '';
+      var wasOpen = openStates($('pvpTable'));
       dids.forEach(function (g) {
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
-        html += '<div class="vgroup"><div class="vgroup-h">' + esc(nameByDid[g] != null ? nameByDid[g] : g) + ' <span class="muted">(' + list.length + ')</span></div>'
+        html += vgroupTag(wasOpen, g, esc(nameByDid[g] != null ? nameByDid[g] : g) + ' <span class="muted">(' + list.length + ')</span>')
           + '<table><tr><th>Action</th><th>Target</th><th>List</th><th>Send</th><th class="num">Waves</th><th class="num">Travel</th><th>Detail</th></tr>'
           + list.map(function (r) {
             var travel = r.status === 'move'
@@ -1090,7 +1112,7 @@
               + '<td>' + compLabel(r.comp) + '</td><td class="num">' + r.waves + '</td>'
               + '<td class="num">' + travel + '</td>'
               + '<td class="muted">' + (r.status === 'move' ? '→ ' + esc(r.toVillage || '?') : '') + '</td></tr>';
-          }).join('') + '</table></div>';
+          }).join('') + '</table></details>';
       });
       $('pvpTable').innerHTML = html || '<p class="muted">No PvP farms on Role-pvp villages' + (rows.length ? ' for the selected filters' : '') + '.</p>';
     }
@@ -1178,17 +1200,18 @@
         });
       });
       var html = '';
+      var wasOpen = openStates($('mpTable'));
       inst.villages.forEach(function (iv, vi) {
         var assigned = result.perVillage[vi];
         if (!assigned.length) return; // villages with nothing assigned still show in the troop table above
         var rows = assigned.slice().sort(function (a, b) { return (a.dist - b.dist) || (a.oi - b.oi); });
-        html += '<div class="vgroup"><div class="vgroup-h">' + esc(iv.name) + ' <span class="muted">(' + assigned.length + (assigned.length === 1 ? ' oasis' : ' oases') + ' · ' + result.used[vi].toLocaleString() + (result.used[vi] === 1 ? ' movement' : ' movements') + ')</span></div>'
+        html += vgroupTag(wasOpen, iv.did, esc(iv.name) + ' <span class="muted">(' + assigned.length + (assigned.length === 1 ? ' oasis' : ' oases') + ' · ' + result.used[vi].toLocaleString() + (result.used[vi] === 1 ? ' movement' : ' movements') + ')</span>')
           + '<table><tr><th>Oasis</th><th class="num">Dist</th><th class="num" title="ceil(2 × travel / interval) — the rainbows / movements this oasis ties up">Cost</th><th>Type</th><th>In farm list</th></tr>'
           + rows.map(function (p) {
               var o = inst.oases[p.oi];
               var lists = (listsByKey[o.x + '|' + o.y] || []).map(function (l) { return '<span title="' + esc(l.village) + '">' + esc(l.name) + '</span>'; }).join(', ');
               return '<tr><td>' + mapLink(o.x, o.y) + '</td><td class="num">' + p.dist.toFixed(1) + '</td><td class="num">' + p.cost + '</td><td>' + typeLabel(o.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
-            }).join('') + '</table></div>';
+            }).join('') + '</table></details>';
       });
       $('mpTable').innerHTML = html || '<p class="muted">Nothing farmable under this budget — raise the Movement budget or widen the filters.</p>';
     }

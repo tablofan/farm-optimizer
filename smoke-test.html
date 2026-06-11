@@ -88,6 +88,19 @@ window.addEventListener('load', async () => {
     await tick(800);
     log(!$('secRes').classList.contains('hidden') && /Oases farmed/.test($('cards').textContent), 'Optimise still works after refactor', $('cards').textContent.slice(0, 40));
 
+    // collapsible village groups: click header to collapse; state survives a filter re-render
+    const dDet = Array.prototype.find.call($('diffTable').querySelectorAll('details.vgroup'), d => d.querySelector('.b-add'));
+    dDet.querySelector('summary').click();
+    await tick(50);
+    log(dDet.open === false, 'village group collapses on header click');
+    const dKey = dDet.getAttribute('data-g');
+    const keepLab = Array.prototype.find.call($('diffFilters').querySelectorAll('label'), l => l.getAttribute('data-st') === 'keep');
+    keepLab.querySelector('input').click(); await tick(100); // off (redraw)
+    keepLab.querySelector('input').click(); await tick(100); // back on (redraw again)
+    const dDet2 = $('diffTable').querySelector('details.vgroup[data-g="' + dKey + '"]');
+    log(!!dDet2 && dDet2.open === false, 'collapsed group stays collapsed across filter re-renders');
+    if (dDet2) { dDet2.querySelector('summary').click(); await tick(50); } // reopen
+
     // ── PvP tab: rebalance end-to-end ──
     Array.prototype.find.call(D.querySelectorAll('#tabBar .tab-btn'), b => b.getAttribute('data-tab') === 'pvp').click();
     await tick(100);
