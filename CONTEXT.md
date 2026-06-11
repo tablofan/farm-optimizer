@@ -173,26 +173,30 @@ One in-flight farm-send occupying a troop-movement slot. At steady state a farme
 `ceil(2 × travel/interval)` of them, so the account total = the sum of all assigned rainbow costs.
 The gameworld caps total troop movements at **20,000**; the **Calculator** displays this estimate
 but does not optimize against it. (The **Movement planner** does constrain movements — but against a
-per-village **Movement budget** the player chooses, not against this game cap.)
+pooled **Movement budget** the player chooses, not against this game cap.)
 
 **Movement planner**:
 The **Calculator** tab that answers "what would it take?": it re-runs the oasis assignment for every
-Role-PvE **Village** with a **Movement budget** in place of **Capacity** (real cavalry stocks play no
-part in the solve), maximizing the total count of **Oases** farmed account-wide — each oasis by at
-most one village — and reports each village's consumed movements as the cavalry stock to train
-(1 of each selected type per movement, shown with the gap against today's stock). Purely hypothetical
-and display-only: there is no **Plan diff** — **Current farm lists** are shown per-oasis as
-information, never reconciled. It honors **Skipped oases** and carries its own resource filter and
-its own cavalry selection (seeded from the oasis optimizer's).
+Role-PvE **Village** with one pooled **Movement budget** in place of every **Capacity** constraint
+(real cavalry stocks play no part in the solve), maximizing the total count of **Oases** farmed
+account-wide — each oasis by at most one village, served by whichever village farms it cheapest —
+and reports each village's consumed movements as the cavalry stock to train (1 of each selected type
+per movement, shown with the gap against today's stock). Purely hypothetical and display-only: there
+is no **Plan diff** — **Current farm lists** are shown per-oasis as information, never reconciled.
+It honors **Skipped oases** and carries its own resource filter and its own cavalry selection
+(seeded from the oasis optimizer's).
 _Avoid_: what-if (descriptive only), troop planner, movement simulator.
 
 **Movement budget**:
-A hypothetical, **uniform per-village** ceiling on **Outgoing movements** — the **Movement planner**'s
-single input N. Every Role-PvE village gets the same budget, and a village's assigned oases must keep
-its total cost ≤ N — a ceiling, never overshot, so actual consumption typically lands below it.
-Unrelated to the 20,000 game cap, and distinct from **Capacity** (the budget fed by real stocks).
+A hypothetical ceiling on **Outgoing movements** from oasis farming, **pooled account-wide** — the
+**Movement planner**'s single input N. All Role-PvE villages draw from the one shared pool: the
+*sum* of their assigned oases' costs must stay ≤ N — a ceiling, never overshot. No village has an
+individual bound: per-village consumption is reported, not limited, and may skew toward
+well-placed villages. Unrelated to the 20,000 game cap, and distinct from **Capacity** (the budget
+fed by real stocks). _Was_: a uniform per-village ceiling — changed to one shared pool (2026-06-11).
 _Avoid_: movement target (it's a ceiling, not a goal to reach), movement cap (collides with the
-game's 20,000 cap), budget (alone — ambiguous with the **Capacity**-fed budget).
+game's 20,000 cap), per-village budget (the pool replaced it), budget (alone — ambiguous with the
+**Capacity**-fed budget).
 
 ## Relationships
 
@@ -204,7 +208,7 @@ game's 20,000 cap), budget (alone — ambiguous with the **Capacity**-fed budget
 - Each oasis assignment ties up **Cavalry** as **Rainbows**; each **PvP farm** ties up its **Send** × waves in flight.
 - **Travel time** is a function of **Distance**, unit speed (slowest in the send), **Tournament Square**, and **Speed artefact**.
 - A **Village** has a **Capacity** — the rainbows it can sustain across its assigned oases at a given **Sending interval**.
-- The **Movement planner** re-runs the oasis assignment with a uniform **Movement budget** in place of each Role-PvE **Village**'s **Capacity**, and reads the troops to train off each village's consumed movements.
+- The **Movement planner** re-runs the oasis assignment with one pooled **Movement budget** in place of every Role-PvE **Village**'s **Capacity**, and reads the troops to train off each village's consumed movements.
 
 ## Example dialogue
 

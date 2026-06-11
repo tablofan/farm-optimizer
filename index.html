@@ -270,7 +270,7 @@
     <div class="tabpane" id="tab-plan">
       <p class="muted" id="hintPlan">No data yet — start on the <b>Data &amp; villages</b> tab: Send from the collector, import a file, or Load sample.</p>
       <div class="section hidden" id="secPlan">
-        <div class="section-title">Movement planner <span class="muted" style="text-transform:none;letter-spacing:0">— what would it take? Every Role-pve village gets the same hypothetical movement budget (troop stocks are ignored); the solver then farms as many oases as possible account-wide, each oasis by at most one village</span></div>
+        <div class="section-title">Movement planner <span class="muted" style="text-transform:none;letter-spacing:0">— what would it take? All Role-pve villages share one hypothetical pool of outgoing movements (troop stocks are ignored); the solver farms as many oases as possible account-wide, each by whichever village reaches it cheapest</span></div>
         <p class="muted" style="margin-bottom:8px">Pick up to <b>3</b> cavalry types (a "rainbow" = 1 of each); the slowest sets travel speed. Seeded from the optimizer's selection — changing it here never affects the optimizer.</p>
         <div class="row" id="mpCavRow"></div>
         <p class="muted" style="margin:12px 0 8px">Farm only these oasis resource types (double oases bucket by their primary/non-crop bonus):</p>
@@ -278,7 +278,7 @@
         <div class="row" style="margin-top:14px">
           <span class="muted">Movement budget:</span>
           <input type="number" id="mpBudget" value="1000" min="1" step="1" style="width:90px">
-          <span class="muted">outgoing movements per village — a ceiling, never exceeded</span>
+          <span class="muted">outgoing movements — one pool shared by all Role-pve villages; a ceiling, never exceeded</span>
           <button class="primary" id="btnPlan">Calculate</button>
         </div>
       </div>
@@ -1092,9 +1092,10 @@
     }
 
     // ── Movement planner (see CONTEXT.md "Movement planner" / "Movement budget") ──
-    // The oasis optimizer's instance with one substitution: every Role-pve village's budget is the
-    // uniform hypothetical Movement budget (stocks ignored), and the cavalry / resource selections
-    // are the planner's own copies. Display only — no plan diff; lists shown per oasis as info.
+    // The oasis optimizer's instance, solved against ONE pooled Movement budget shared by all
+    // Role-pve villages (stocks ignored; budgetOverride only prunes pairs that could never fit the
+    // pool — solvePool enforces the pooled ceiling). The cavalry / resource selections are the
+    // planner's own copies. Display only — no plan diff; lists shown per oasis as info.
     function gatherPlanCfg(budget) {
       var intervalMin = intSec($('gIntSec').value) / 60;
       var perVillage = {}, included = [];
@@ -1118,7 +1119,7 @@
       if (!cfg.selectedSlots.length) { alert('Select at least one cavalry type.'); return; }
       if (!cfg.includedDids.length) { alert('No village has Role = pve — set roles in the village table (Data & villages tab).'); return; }
       var inst = PVE.buildInstance(STATE.data, cfg);
-      var result = PVE.solve(inst, { solver: getSolver(), maxExactPairs: 50, exactTimeoutMs: 10000 });
+      var result = PVE.solvePool(inst, N); // cheapest-first against the pool — provably optimal, no ILP
       renderPlanResults(inst, result, N);
       $('secPlanRes').classList.remove('hidden');
       $('secPlanRes').scrollIntoView({ behavior: 'smooth' });
@@ -1130,15 +1131,15 @@
       var over = combined > 20000;
       var cards = [
         { k: 'Oases farmed / candidates', v: result.count + ' / ' + inst.oases.length },
-        { k: 'Movement budget / village', v: budget.toLocaleString() },
-        { k: 'Outgoing movements', v: result.movements.toLocaleString(), warn: over }
+        { k: 'Movements used / budget', v: result.movements.toLocaleString() + ' / ' + budget.toLocaleString(), warn: over },
+        { k: 'Villages used', v: inst.villages.filter(function (_, i) { return result.used[i] > 0; }).length + ' / ' + inst.villages.length }
       ];
       $('mpCards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('')
         + (over ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">planner + PvP combined — over the 20,000 movement cap</div></div>' : '');
       // per-village requirement + train-delta: movements consumed = rainbows needed = the stock of
       // EACH selected type; "to train" is the gap vs today's stock (stocks inform display, not the solve)
       var slots = inst.selectedSlots;
-      var head = '<tr><th>Village</th><th class="num">Oases</th><th class="num" title="Movements consumed (≤ budget) = rainbows in flight = the stock of EACH selected type this village needs">Need of each</th>'
+      var head = '<tr><th>Village</th><th class="num">Oases</th><th class="num" title="Movements drawn from the shared pool = rainbows in flight = the stock of EACH selected type this village needs">Need of each</th>'
         + slots.map(function (s) { return '<th class="num">' + esc(unitName(s)) + ' — train</th>'; }).join('') + '</tr>';
       var totOases = 0, totMov = 0, totTrain = {};
       slots.forEach(function (s) { totTrain[s] = 0; });

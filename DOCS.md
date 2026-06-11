@@ -50,14 +50,16 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
      (keep / move only), with a per-village × per-unit-type **used/stock** table, shortfall
      highlighting, and warnings for entries it must exclude (unresolved list owner, frozen —
      holder not Role-pvp —, or no readable send comp).
-   - **Movement planner** — "what would it take?": the oasis optimizer re-run with every Role-pve
-     village's capacity replaced by one uniform hypothetical **Movement budget** (outgoing
-     movements per village — a ceiling, never exceeded; troop stocks play no part in the solve).
-     Reports per village the movements consumed = the stock of **each** selected cavalry type
-     needed, with a **to-train** gap vs today's stock, plus the assignment grouped by village
-     (farm-list membership shown per oasis as info — no plan diff) and leftovers as a summary
-     count. It carries its **own** cavalry picker (seeded from the optimizer's selection) and
-     resource filter, so hypotheticals never reconfigure the real plan.
+   - **Movement planner** — "what would it take?": the oasis assignment re-run with all Role-pve
+     capacities replaced by one **pooled** hypothetical **Movement budget** (outgoing movements
+     summed account-wide — a ceiling, never exceeded; no per-village bound; troop stocks play no
+     part in the solve). Each oasis goes to whichever village farms it cheapest, so cheapest-first
+     greedy is provably optimal — no ILP involved. Reports per village the movements consumed =
+     the stock of **each** selected cavalry type needed, with a **to-train** gap vs today's stock,
+     plus the assignment grouped by village (farm-list membership shown per oasis as info — no
+     plan diff) and leftovers as a summary count. It carries its **own** cavalry picker (seeded
+     from the optimizer's selection) and resource filter, so hypotheticals never reconfigure the
+     real plan.
 
    *Why send the page, not the map?* Villages/farm-lists/troops all live on one rendered page each
    (Send page captures them). The **map** doesn't: it renders as raster image tiles with no per-tile

@@ -703,7 +703,7 @@ t('deriveRole legacy inc:false: pvp if it holds PvP farms (even alongside oases)
   assert.strictEqual(PVE.deriveRole({ oasis: false, pvp: false }, { inc: false }), null, 'legacy + no visible farms -> defer');
 });
 
-console.log('movement planner (budgetOverride — uniform hypothetical Movement budget)');
+console.log('movement planner (pooled Movement budget — solvePool)');
 t('budgetOverride replaces the stock-fed budget for every included village', () => {
   const data = { mapRadius: 200,
     villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t4: 7 } },
@@ -715,26 +715,27 @@ t('budgetOverride replaces the stock-fed budget for every included village', () 
   assert.strictEqual(inst.villages[0].budget, 1000, 'stocks (min(7, missing t5=0)) play no part');
   assert.strictEqual(inst.villages[1].budget, 1000, 'a troopless village still gets the full budget');
 });
-t('budgetOverride is a ceiling: consumption stays ≤ N; count matches the cheapest-first optimum', () => {
-  // one village, oases at growing distance: costs rise, the budget cuts the tail.
+t('solvePool: the pool is a ceiling on the SUM; count matches the cheapest-first optimum', () => {
+  // one village, oases at growing distance: costs rise, the pool cuts the tail.
   const oases = [];
   for (let i = 1; i <= 30; i++) oases.push({ x: i * 6, y: 0, bonuses: [{ res: 'crop', pct: 25 }] });
   const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }], oases, farmLists: [] };
   const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
     resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } }, budgetOverride: 100 });
-  const r = PVE.solve(inst, {});
-  assert(r.used[0] <= 100, 'never exceeds the Movement budget (got ' + r.used[0] + ')');
-  assert(r.count > 0 && r.count < 30, 'budget actually cut the tail');
-  // for a single village, max count under a budget = take cheapest costs first — verify against it
+  const r = PVE.solvePool(inst, 100);
+  assert(r.movements <= 100, 'never exceeds the pool (got ' + r.movements + ')');
+  assert(r.count > 0 && r.count < 30, 'pool actually cut the tail');
+  assert.strictEqual(r.optimal, true, 'pooled greedy is provably optimal');
+  // max count under one pool = take the cheapest per-oasis costs first — verify against it
   const costs = inst.pairs.map(p => p.cost).sort((a, b) => a - b);
   let sum = 0, best = 0;
   for (const c of costs) { if (sum + c > 100) break; sum += c; best++; }
   assert.strictEqual(r.count, best, 'matches cheapest-first optimum');
 });
-t('budgetOverride keeps skips + resource filter + per-oasis exclusivity', () => {
+t('solvePool keeps skips + resource filter; each oasis is served by its cheapest village', () => {
   const data = { mapRadius: 200,
-    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }, { did: 2, name: 'B', x: 4, y: 0, troops: {} }],
-    oases: [{ x: 2, y: 0, bonuses: [{ res: 'crop', pct: 25 }] },   // between the two villages
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }, { did: 2, name: 'B', x: 8, y: 0, troops: {} }],
+    oases: [{ x: 2, y: 0, bonuses: [{ res: 'crop', pct: 25 }] },   // dist 2 from A, 6 from B — A is strictly cheaper
             { x: 2, y: 1, bonuses: [{ res: 'wood', pct: 25 }] },   // filtered out
             { x: 2, y: -1, bonuses: [{ res: 'crop', pct: 25 }] }], // skipped
     farmLists: [] };
@@ -742,13 +743,31 @@ t('budgetOverride keeps skips + resource filter + per-oasis exclusivity', () => 
     resourceFilter: { crop: true, wood: false }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 }, 2: { ts: 0, interval: 5, artefact: 1 } },
     skipped: ['2|-1'], budgetOverride: 50 });
   assert.strictEqual(inst.oases.length, 1, 'skip + filter still apply to the candidate pool');
-  const r = PVE.solve(inst, {});
-  assert.strictEqual(r.count, 1, 'the shared oasis is farmed');
-  // exclusivity: exactly ONE village holds it (both can afford it — distance 2 either way)
-  assert(inst.pairs.length === 2, 'both villages can afford the oasis');
-  const holders = r.perVillage.filter(list => list.length > 0);
-  assert.strictEqual(holders.length, 1, 'held by exactly one village');
-  assert.strictEqual(r.perVillage[0].length + r.perVillage[1].length, 1, 'never both');
+  assert.strictEqual(inst.pairs.length, 2, 'both villages could afford it');
+  const r = PVE.solvePool(inst, 50);
+  assert.strictEqual(r.count, 1, 'the oasis is farmed');
+  assert.strictEqual(r.perVillage[0].length, 1, 'served by the cheaper village (A)');
+  assert.strictEqual(r.perVillage[1].length, 0, 'and by no one else');
+});
+t('the pool binds ACROSS villages: skew accepted, sum capped — per-village budgets would differ', () => {
+  // A's cluster costs 1+2+3+4 = 10; B's cluster costs 9,10,11,12. Pool N=12: cheapest-first takes
+  // all of A's, then B's cheapest (9) no longer fits (10+9 > 12) — so A draws 10/12, B nothing.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }, { did: 2, name: 'B', x: 100, y: 0, troops: {} }],
+    oases: [1, 2, 3, 4].map(x => ({ x, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }))            // near A
+      .concat([90, 89, 88, 87].map(x => ({ x, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }))),   // near B
+    farmLists: [] };
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1, 2],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 }, 2: { ts: 0, interval: 5, artefact: 1 } },
+    budgetOverride: 12 });
+  const r = PVE.solvePool(inst, 12);
+  assert(r.movements <= 12, 'pooled sum capped (got ' + r.movements + ')');
+  assert.strictEqual(r.count, 4, 'pool binds: only the cheap cluster fits');
+  assert.strictEqual(r.used[0], 10, 'A draws most of the pool — no per-village bound');
+  assert.strictEqual(r.used[1], 0, 'B draws nothing');
+  // discriminator: the OLD per-village semantics (budget 12 EACH) would farm a 5th oasis from B
+  const old = PVE.solve(inst, {});
+  assert.strictEqual(old.count, 5, 'sanity: per-village budgets would farm more — the pool is what binds');
 });
 t('budgetOverride 0 yields no feasible pairs (not mistaken for "no override")', () => {
   const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 500 } }],
@@ -765,7 +784,7 @@ t('no budgetOverride -> stock-fed budget unchanged (regression)', () => {
     resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } } });
   assert.strictEqual(inst.villages[0].budget, 42);
 });
-t('uniform budget on the sample data: every village stays ≤ N, every oasis farmed at most once', () => {
+t('pooled budget on the sample data: the SUM stays ≤ N (individual villages unbounded)', () => {
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'sample-data.json')));
   const N = 25;
   const perVillage = {};
@@ -775,9 +794,10 @@ t('uniform budget on the sample data: every village stays ≤ N, every oasis far
     includedDids: data.villages.map(v => v.did),
     resourceFilter: { wood: true, clay: true, iron: true, crop: true },
     perVillage, budgetOverride: N });
-  inst.villages.forEach(v => assert.strictEqual(v.budget, N));
-  const r = PVE.solve(inst, {});
-  r.used.forEach((u, vi) => assert(u <= N, inst.villages[vi].name + ' within the Movement budget'));
+  const r = PVE.solvePool(inst, N);
+  assert(r.movements <= N, 'pooled consumption within the budget (got ' + r.movements + ')');
+  assert.strictEqual(r.used.reduce((s, u) => s + u, 0), r.movements, 'per-village used sums to movements');
+  assert(r.count > 0, 'something is farmed at N=25');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed' + (skipped ? ', ' + skipped + ' skipped' : ''));
