@@ -17,11 +17,13 @@ a **Collector** userscript and a static **Calculator** page.
 > originally planned; where they say "include", read "Role = pve".
 
 > **Note (2026-06-11, Movement planner):** the calculator grew a fifth tab — the **Movement
-> planner** (see `CONTEXT.md`): the oasis solve re-run with every Role-pve village's budget
-> replaced by one uniform hypothetical **Movement budget** (`buildInstance`'s `budgetOverride`),
-> reporting per village the movements consumed = the stock of each selected cavalry type to train.
-> Display only, no plan diff; it carries its own cavalry picker (seeded from the optimizer's) and
-> resource filter.
+> planner** (see `CONTEXT.md`): the oasis assignment re-run against one **pooled** hypothetical
+> **Movement budget** shared by all Role-pve villages (`buildInstance`'s `budgetOverride` prunes
+> pairs that could never fit; `solvePool` enforces the pooled ceiling — cheapest-village,
+> cheapest-first, provably optimal, no ILP), reporting per village the movements consumed = the
+> stock of each selected cavalry type to train. Display only, no plan diff; it carries its own
+> cavalry picker (seeded from the optimizer's) and resource filter. (_Was_, same day: a uniform
+> per-village budget — changed to one shared pool.)
 
 ## Components
 

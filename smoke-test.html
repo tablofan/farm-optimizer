@@ -100,7 +100,7 @@ window.addEventListener('load', async () => {
     const usage = $('pvpUsage').textContent;
     log(/P007/.test(usage) && /P008/.test(usage), 'usage table lists both pvp villages');
 
-    // ── Movement planner tab: hypothetical uniform budget end-to-end ──
+    // ── Movement planner tab: pooled Movement budget end-to-end ──
     Array.prototype.find.call(D.querySelectorAll('#tabBar .tab-btn'), b => b.getAttribute('data-tab') === 'plan').click();
     await tick(100);
     log($('tab-plan').classList.contains('on'), 'plan tab activates');
@@ -124,7 +124,9 @@ window.addEventListener('load', async () => {
     const mpBody = mpRows.slice(0, -1); // last row = Account totals
     log(mpBody.length >= 1, 'troop table lists the Role-pve villages', mpBody.length + ' village rows');
     const needs = mpBody.map(tr => parseInt(tr.cells[2].textContent.replace(/[.,]/g, ''), 10));
-    log(needs.every(n => n <= 40), 'every village stays within the 40-movement budget', JSON.stringify(needs));
+    const poolUsed = needs.reduce((a, b) => a + b, 0);
+    log(poolUsed <= 40, 'pooled consumption stays within the 40-movement budget', poolUsed + ' / 40');
+    log(/Movements used \/ budget/i.test($('mpCards').textContent), 'pooled budget card renders');
     log(/Account/.test(mpRows[mpRows.length - 1].textContent), 'account totals row present');
     log($('mpTable').querySelectorAll('.vgroup').length >= 1, 'assignment listing grouped by village');
     log(W.JSON.parse(W.localStorage.getItem('pveData')).config.movementBudget === 40, 'Movement budget persisted');

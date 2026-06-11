@@ -57,9 +57,10 @@
   //         oases:[{x,y,bonuses:[{res,pct}]}], farmLists:[...] }
   // cfg:  { units, selectedSlots:[..], includedDids:Set/array, resourceFilter:{wood,..},
   //         perVillage:{did:{ts,interval,artefact}}, skipped:["x|y", …], budgetOverride }
-  // budgetOverride (Movement planner — see CONTEXT.md "Movement budget"): a uniform hypothetical
-  // per-village budget that replaces the stock-fed Capacity for EVERY included village; real
-  // troop counts then play no part in the solve.
+  // budgetOverride (Movement planner — see CONTEXT.md "Movement budget"): replaces the stock-fed
+  // Capacity with one number for EVERY included village, so real troop counts play no part in the
+  // solve. The pooled planner passes its pool here; since solvePool never consults v.budget, the
+  // override's only effect there is pruning pairs that could never fit the pool (cost > N).
   // There is deliberately NO travel/reachability cap (see ADR-0002): budget feasibility alone
   // bounds the candidate set, and max-cardinality only takes a far oasis when it adds a farm.
   // units = UNITS[tribe] (slot->unit array). Returns an instance for the solver.
@@ -279,6 +280,33 @@
           : 'greedy heuristic (ILP found nothing better within ' + Math.round(timeoutMs / 1000) + 's)')
       : 'greedy heuristic (no ILP solver loaded)';
     return Object.assign(g, { method: note, optimal: false });
+  }
+
+  // ── Movement planner solve (see CONTEXT.md "Movement budget") ──────
+  // ONE pooled budget over all villages — no per-village bound. Each oasis is served by whichever
+  // village farms it cheapest, and maximizing count under a single pool = take oases cheapest-first:
+  // with unit values and one knapsack the k cheapest costs are feasible iff any k are, so plain
+  // greedy is provably optimal (and movement-minimal for that count). No ILP involved.
+  // Expects an instance built with budgetOverride = the pool (pairs pruned only at cost > pool);
+  // per-village v.budget is NOT consulted here.
+  function solvePool(inst, budget) {
+    var left = (budget != null && isFinite(budget) && budget > 0) ? Math.floor(budget) : 0;
+    var best = {}; // oi -> its cheapest pair (tie-break: distance, then village order — deterministic)
+    inst.pairs.forEach(function (p) {
+      var b = best[p.oi];
+      if (!b || p.cost < b.cost || (p.cost === b.cost && (p.dist < b.dist || (p.dist === b.dist && p.vi < b.vi)))) best[p.oi] = p;
+    });
+    var order = Object.keys(best).map(function (k) { return best[k]; }).sort(function (a, b) {
+      return a.cost - b.cost || a.dist - b.dist || a.oi - b.oi;
+    });
+    var assign = {};
+    for (var i = 0; i < order.length; i++) {
+      var p = order[i];
+      if (p.cost > left) break; // sorted ascending — nothing later fits either
+      assign[p.oi] = p.vi; left -= p.cost;
+    }
+    return Object.assign(finalize(inst, assign),
+      { method: 'cheapest-first (pooled budget — provably optimal)', optimal: true });
   }
 
   // ── Plan diff vs current farm lists (free oases only) ──────────────
@@ -648,7 +676,7 @@
     axisSize: axisSize, torusDelta: torusDelta, distance: distance,
     travelMinutes: travelMinutes, oasisCost: oasisCost, primaryRes: primaryRes, RES: RES,
     buildInstance: buildInstance, greedy: greedy, greedyPairs: greedyPairs, bestGreedy: bestGreedy,
-    solveExact: solveExact, solve: solve,
+    solveExact: solveExact, solve: solve, solvePool: solvePool,
     planDiff: planDiff, browseOases: browseOases,
     compSpeed: compSpeed, buildPvpInstance: buildPvpInstance, pvpRebalance: pvpRebalance,
     farmKinds: farmKinds, deriveRole: deriveRole
