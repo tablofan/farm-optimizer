@@ -21,6 +21,7 @@ window.addEventListener('load', async () => {
 
     log(!$('secBrowse').classList.contains('hidden'), 'browser section visible after data');
     log(D.querySelectorAll('#tabBar .tab-btn').length === 5, 'tab bar has 5 tabs');
+    log(!D.querySelector('.container > .callout'), 'no stale-cache banner with fresh scripts');
     log($('tab-data').classList.contains('on'), 'data tab active by default');
     const opts = $('brVil').options;
     log(opts.length === 5, 'village dropdown has all 5 villages', 'got ' + opts.length);
