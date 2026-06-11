@@ -291,8 +291,12 @@
     </div>
   </div>
 
-  <script src="cavalry.js"></script>
-  <script src="optimizer.js"></script>
+  <!-- ?v= pins the scripts to this page revision: GitHub Pages caches assets for 10 min, and a
+       fresh index.html paired with a stale cached script fails silently (seen live: a cached
+       pre-solvePool optimizer.js made the Movement planner's Calculate a no-op). Bump BOTH when
+       either file changes; the boot guard below catches a mismatch that slips through anyway. -->
+  <script src="cavalry.js?v=2"></script>
+  <script src="optimizer.js?v=2"></script>
   <!-- exact ILP solver (pure JS, no build). Falls back to greedy if unavailable. -->
   <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"
           onerror="window.__solverFailed=true"></script>
@@ -1250,6 +1254,22 @@
       ack();
     });
     try { if (window.opener) window.opener.postMessage('pve-ready', '*'); } catch (e) { /* ignore */ }
+
+    // ── stale-cache guard ──
+    // The ?v= pins above should keep page + scripts in lockstep, but if a stale cached script
+    // slips through anyway (or a future bump is forgotten), the symptom is buttons silently
+    // doing nothing — say so loudly instead.
+    var missingApi = ['buildInstance', 'solve', 'solvePool', 'planDiff', 'browseOases',
+                      'buildPvpInstance', 'pvpRebalance', 'farmKinds', 'deriveRole']
+      .filter(function (fn) { return typeof (window.PVE && PVE[fn]) !== 'function'; });
+    if (missingApi.length || typeof UNITS !== 'object') { // bare typeof: `const UNITS` is a global lexical binding, never a window property
+      document.querySelector('.container').insertBefore(
+        el('div', { class: 'callout', style: 'margin-bottom:14px' },
+          '⚠ This page was updated but your browser kept an old script in cache'
+          + (missingApi.length ? ' (missing: ' + esc(missingApi.join(', ')) + ')' : '')
+          + '. Hard-refresh to fix — <b>Ctrl+F5</b> (Windows/Linux) or <b>Cmd+Shift+R</b> (Mac).'),
+        document.querySelector('.tabs'));
+    }
 
     // ── boot ──
     restore();

@@ -123,6 +123,12 @@ google-chrome --headless=new --disable-gpu --virtual-time-budget=10000 \
 
 (Open via a local server so `fetch('sample-data.json')` works; or use "Import JSON file".)
 
+**When changing `cavalry.js` / `optimizer.js`: bump the `?v=` on BOTH script tags in `index.html`.**
+GitHub Pages caches assets for 10 minutes, so without the bump a visitor can get a fresh page paired
+with a stale cached script — buttons then fail silently (seen live: a cached pre-`solvePool`
+`optimizer.js` made the Movement planner's Calculate a no-op). A boot guard in `index.html` shows a
+hard-refresh banner if the solver API surface is incomplete, as a net for a forgotten bump.
+
 ## Status
 
 Calculator + core logic built and tested (Node unit tests + headless-browser end-to-end), including
