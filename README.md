@@ -1,9 +1,9 @@
 # Farm Optimizer
 
-Farm Optimizer is a client-side planning tool that turns imported Travian account data into
-constrained assignment plans. The game provides the domain, but the core problem is general:
-allocate a large set of jobs across capacity-limited workers while maximizing coverage and
-controlling travel cost.
+Farm Optimizer is a client-side tool for optimizing farming patterns in Travian. It assigns oasis
+and PvP farming targets across villages using imported account data, troop capacity, and travel
+costs. The game provides the domain, but the core problem is general: allocate a large set of jobs
+across capacity-limited workers while maximizing coverage and controlling travel cost.
 
 The application is written in plain JavaScript and HTML, runs entirely in the browser, and keeps
 the optimization engine separate from the UI so it can be tested directly with Node.js.
