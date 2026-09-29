@@ -44,7 +44,7 @@ a **Collector** userscript and a static **Calculator** page.
 
 ### B. Calculator — static `index.html` (sibling of `trade-route-calculator`)
 
-- Import the JSON. Bundle a **cavalry data table** (from `Ash-Warden/.ai/documentation/troops_t46.json`):
+- Import the JSON. Bundle a **cavalry data table** (from a T4.6 troop table, `troops_t46.json`, checked against Kirilloid):
   per tribe, the cavalry units (`type:"c"`) with `speed` (base fields/h) and `cap`; map `t1..t10` →
   unit via tribe (race indices: 0 Romans, 1 Teutons, 2 Gauls, 3 Nature, 4 Natars, 5 Egyptians,
   6 Huns, 7 Spartans, 8 Vikings).
@@ -134,8 +134,8 @@ rather than the full replace that a complete dataset triggers.
   is the incumbent; the ILP is attempted only at ≤ `maxExactPairs` (**50**) pairs and is **timeboxed**
   via `model.timeout` (`opts.exactTimeoutMs`, default 10 s — measured: B&B time explodes past ~50
   pairs on loose-budget instances, e.g. 49 pairs = 36 ms, 62 pairs = 15 s, 78 pairs > 5 min). A
-  timed-out run returns the best incumbent, used only if it beats greedy and labelled not provably
-  optimal. `solveExact` **feasibility-checks** the decoded assignment (budgets) — a timeout with no
+  timed-out run returns the best incumbent, used if it is at least as good as greedy and labelled
+  not provably optimal. `solveExact` **feasibility-checks** the decoded assignment (budgets) — a timeout with no
   integral incumbent leaks the fractional LP relaxation, which rounds to budget violations (seen:
   622/613).
 - **Outgoing-movement estimate** = `Σ ceil(travel/interval)` over assigned oases — outbound waves
@@ -194,6 +194,10 @@ rather than the full replace that a complete dataset triggers.
 - **Speed-server multiplier** — fixed **×2** on all speed worlds (x3/x5 alike), confirmed high.
 
 ## Open data items (validate at build time on a live world)
+
+> **Status:** the map tile tokens and the village / farm-list / troop selectors have been checked
+> against a live world (selectors fixed in 28db002). Still open: the per-entry send comp parse
+> (`VALIDATE LIVE` in `index.html`) and radius auto-detect (the collector's "Map ±" field, default 200).
 
 - Re-derive the full per-tribe cavalry table from Kirilloid `t4.fs/units.ts` (json is partly stale).
 - Exact `/api/v1/map/position` tile token format on the current patch.

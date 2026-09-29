@@ -3,8 +3,7 @@
 A browser tool for planning farming in Travian (x3 speed, T4.6) — both **oasis farming** (which free
 oases should each village farm, and what cavalry does that commit) and **PvP farming** (which village
 should hold each existing player-farm). This file is the shared glossary — terms only, no
-implementation. (_Was_: named "PvE Optimizer" when it only planned oases; the repo slug may lag the
-rename.)
+implementation. (_Was_: named "PvE Optimizer" when it only planned oases.)
 
 ## Language
 

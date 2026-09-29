@@ -13,7 +13,7 @@ it; install the collector from
 
 Every village has a **Role** (pve / pvp / off) — exactly one optimizer may plan from it, so the two
 plans never compete for the same troops. (The tool was named "PvE Optimizer" before the PvP side
-existed; the repo slug may lag.)
+existed.)
 
 See `CONTEXT.md` for the domain glossary, `docs/adr/` for architecture decisions (ADR-0004 covers
 the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
@@ -28,6 +28,11 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
    survives a localStorage clear / new machine). It does *no* parsing — the page HTML carries
    villages / farm-lists / troops, and the calculator parses it. (Parsing lives in the calculator so
    selectors can be fixed by redeploying the page, with no userscript reinstall.) Never writes to the game.
+   A scan retries failed map windows twice more. If windows still fail, or it aborts after 5
+   failures in a row (logged out / rate-limited), it **keeps the previous complete scan** rather
+   than saving a partial one — a gap would silently drop free oases, which then read as PvP farms.
+   (A first scan has nothing to keep, so its result is kept but flagged PARTIAL.) One scan runs at
+   a time, and a scan over 1,000 windows asks first with a time estimate.
 2. **Calculator** (`index.html`) — a static page that **accumulates** sent data (oases + each sent
    page) and **persists** it in localStorage, presented in five tabs:
    - **Data & villages** — import (saved page `.htm`, an **oases-only file** — merged in, keeping
@@ -37,7 +42,16 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
      chip, empty → off; your stored choice then wins), TS / artefact, **editable troop counts** for
      every unit type (fallback when a troops page isn't sent), plus **Now** (current usage — rainbows
      the existing farm lists tie up, free-oasis targets only) and **Plan** (used/budget under the
-     last Optimise) columns.
+     last Optimise) columns. Buttons: **Import file (.json / .htm)…**, **Load sample**, **Export
+     data (.json)** (the whole dataset in the shape Import reads back — keep a copy before a
+     replace), **Forget farm lists** (drops stored lists only, e.g. after deleting lists in-game)
+     and **Clear data**. A full-dataset import asks before replacing existing data, and a bad file
+     leaves the current data untouched. An oases update that has >10% fewer oases than the last
+     scan is applied but flagged (rescan if the scan was cut short). If the browser can't save
+     (storage full or blocked), a banner stays up until a save works — export before reloading.
+     Only an https `travian.com` / `*.travian.com` page may post data in; a full-dataset
+     `postMessage` is accepted from the calculator's own origin only. Plan rows whose farm-list
+     owner never resolved group under **Unknown village**.
    - **Oasis Optimizer** — pick ≤3 cavalry types (carry-0 cavalry — scouts — are excluded; the
      picker shows speed only), filter by resource, Optimise. Shows a **display-only plan diff
      grouped by village** (keep / add / move / remove; the status toggles persist; a move stays
@@ -98,7 +112,9 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
   flagged optimal; otherwise the exact ILP is tried only at ≤50 pairs (`jsLPSolver`, CDN — its
   branch-and-bound cliffs at ~60 pairs: 62 pairs = 15 s, 78 pairs > 5 min), **timeboxed (10 s)**,
   its result *feasibility-checked* (a timeout can leak the fractional LP relaxation, which rounds
-  to budget violations) and kept only if it beats greedy. The plan shows the **outgoing-movement**
+  to budget violations) and kept if it is at least as good as greedy. Real instances are far past
+  50 pairs, so in practice the greedy is what plans. Cost ties go to the village that farms the
+  oasis today, so an equally good plan never proposes a pointless move. The plan shows the **outgoing-movement**
   estimate (= Σ `ceil(travel / interval)` — outbound waves only, matching the game's outgoing
   counter; the return leg shows in-game as *incoming* and is not counted) against the 20,000 game
   cap. Troop budgets stay on the round-trip rainbow cost — troops are busy both legs.
@@ -106,25 +122,23 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
   free oasis, with its parsed send comp); only *who holds each entry* changes. All unit types count
   (infantry included; the hero is ignored): a farm ties up `comp × ceil(2 × travel / interval)` of
   each type it sends, against the holder's per-type stocks; the slowest unit in the send sets its
-  speed. Two phases **alternating to a joint fixpoint**: **overload repair** (while a village is
-  over stock, move the farm closest to a receiving village that can absorb it) and **keep-biased
-  improvement** (a farm moves only if it saves ≥ 2 min one-way — fixed, no knob); alternation
-  matters because an improvement move can free exactly the receiver capacity a stuck repair
-  needed. Budgets are **soft for staying, hard for moving**: the
+  speed. Three passes **alternating to a joint fixpoint**: **overload repair** (while a village is
+  over stock, move one of its farms to its nearest village that can absorb it — preferring a farm
+  whose move alone clears the overload, then the one closest to its receiver), **keep-biased
+  improvement** (a farm moves only if it saves ≥ 2 min one-way — fixed, no knob) and **return
+  home** (a farm moved by an earlier repair goes back once its original village can absorb it
+  again, unless staying saves ≥ 2 min). Alternation matters because an improvement move can free
+  exactly the receiver capacity a stuck repair needed, or make an earlier repair unnecessary.
+  Budgets are **soft for staying, hard for moving**: the
   current state may be over budget (that's the main use case) and shows as per-type shortfalls, but
   a proposed move never creates or worsens one.
 
 ## Develop / test
 
-```sh
-node test.js                 # unit tests for the core logic
-python3 -m http.server 8731  # then open http://localhost:8731/index.html, click "Load sample data"
-# headless e2e (needs Chrome): serves the calculator, posts sample data, checks the UI
-google-chrome --headless=new --disable-gpu --virtual-time-budget=10000 \
-  --dump-dom http://localhost:8731/smoke-test.html | grep -E 'SMOKE-(OK|FAIL)'
-```
-
-(Open via a local server so `fetch('sample-data.json')` works; or use "Import JSON file".)
+Commands are in the README: `node test.js` (unit tests), `python3 -m http.server 8731` (then
+**Load sample**; a local server is needed so `fetch('sample-data.json')` works, or use **Import
+file**), and `./smoke.sh` (headless end-to-end check). CI runs the unit tests on Node 22 and 24
+with the real ILP solver installed, plus the smoke test.
 
 **When changing `cavalry.js` / `optimizer.js`: bump the `?v=` on BOTH script tags in `index.html`.**
 GitHub Pages caches assets for 10 minutes, so without the bump a visitor can get a fresh page paired
@@ -134,9 +148,9 @@ hard-refresh banner if the solver API surface is incomplete, as a net for a forg
 
 ## Status
 
-Calculator + core logic built and tested (Node unit tests + headless-browser end-to-end), including
-the PvP rebalancer. The live DOM/endpoint parsers are written from documented selectors and marked
-`VALIDATE LIVE` — confirm them against a logged-in gameworld (build-plan step 7). The newest of
-these is the **per-entry send comp** parse in the farm-list slot rows (unit icons + counts), which
-the PvP side budgets with — unvalidated entries degrade to a "no readable comp" warning, never a
+Calculator + core logic built and tested (Node unit tests + headless-browser end-to-end, both in
+CI), including the PvP rebalancer. The map scan and the village / farm-list / troop parsers have
+been checked against a live gameworld (selectors fixed in 28db002). One parser is still marked
+`VALIDATE LIVE`: the **per-entry send comp** in the farm-list slot rows (unit icons + counts), which
+the PvP side budgets with. An entry it can't read degrades to a "no readable comp" warning, never a
 silent wrong plan.

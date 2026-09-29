@@ -1,42 +1,51 @@
 <!DOCTYPE html>
 <!-- Headless e2e smoke test (see DOCS.md "Develop / test"). Iframes the calculator on the same
      origin, posts sample-data.json via the tests-allowed postMessage path, and asserts the Oasis
-     browser + optimizer UI behave. Output: SMOKE-OK / SMOKE-FAIL lines in #out. -->
+     browser + optimizer UI behave, then the data-safety paths (export/import round trip, atomic
+     import, stale results, input write-back, storage failure, origin checks).
+     Output: one OK / FAIL line per check in #out, always ending with a DONE line (no DONE = the
+     run hung). The marker prefix is built by concatenation and never spelled out here, so
+     smoke.sh's grep over --dump-dom (which includes this source) only matches #out. -->
 <html><head><meta charset="UTF-8"></head><body>
 <iframe id="f" src="index.html" style="width:1200px;height:2000px"></iframe>
+<!-- opaque-origin ("null") poster for the origin check: loaded up front, fires on 'go' -->
+<iframe id="sb" sandbox="allow-scripts" style="display:none" srcdoc="<script>onmessage = function (e) { if (e.data !== 'go') return; parent.frames[0].postMessage({ villages: [], oases: [], farmLists: [] }, '*'); parent.frames[0].postMessage({ pve: 'oases', oases: [] }, '*'); parent.postMessage('sb-posted', '*'); };</script>"></iframe>
 <pre id="out"></pre>
 <script>
+const MK = 'SMOKE' + '-';
 const out = [];
-function log(ok, name, extra) { out.push((ok ? 'SMOKE-OK   ' : 'SMOKE-FAIL ') + name + (extra ? ' — ' + extra : '')); }
+function log(ok, name, extra) { out.push(MK + (ok ? 'OK   ' : 'FAIL ') + name + (extra ? ' — ' + extra : '')); }
 const tick = ms => new Promise(r => setTimeout(r, ms));
+// canonical JSON (sorted keys) for deep-equality of stored datasets
+const canon = v => Array.isArray(v) ? '[' + v.map(canon).join(',') + ']'
+  : (v && typeof v === 'object') ? '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}'
+  : JSON.stringify(v);
 window.addEventListener('load', async () => {
   try {
     const f = document.getElementById('f');
-    const W = f.contentWindow, D = f.contentDocument;
+    let W = f.contentWindow, D = f.contentDocument;
     W.localStorage.removeItem('pveData');
     const data = await fetch('sample-data.json').then(r => r.json());
     W.postMessage(data, '*'); // legacy full payload -> loadData (same-origin allowed for tests)
     await tick(500);
-    const $ = id => D.getElementById(id);
+    let $ = id => D.getElementById(id);
 
     log(!$('secBrowse').classList.contains('hidden'), 'browser section visible after data');
     log(D.querySelectorAll('#tabBar .tab-btn').length === 5, 'tab bar has 5 tabs');
-    log(!D.querySelector('.container > .callout'), 'no stale-cache banner with fresh scripts');
+    log(!D.querySelector('.container > .callout:not(#storeWarn)'), 'no stale-cache banner with fresh scripts');
+    log($('storeWarn').classList.contains('hidden'), 'no storage-failure banner while saving works');
     log($('tab-data').classList.contains('on'), 'data tab active by default');
     const opts = $('brVil').options;
     log(opts.length === 5, 'village dropdown has all 5 villages', 'got ' + opts.length);
     log(/A001 \(-18\|-93\)/.test(opts[0].textContent), 'dropdown label is "name (x|y)"', opts[0].textContent);
 
     // roles derived from the lists: oasis farms -> pve, pvp farms -> pvp, no farms -> off
-    const roleOf = name => {
-      const tr = Array.prototype.find.call($('vilTable').querySelectorAll('tr[data-did]'),
-        r => r.cells[1].textContent === name);
-      return tr && tr.querySelector('.vrole').value;
-    };
+    const rowOf = name => Array.prototype.find.call($('vilTable').querySelectorAll('tr[data-did]'), r => r.cells[1].textContent === name);
+    const roleOf = name => { const tr = rowOf(name); return tr && tr.querySelector('.vrole').value; };
     log(roleOf('A001') === 'pve', 'A001 derives Role pve', roleOf('A001'));
     log(roleOf('P007') === 'pvp', 'P007 derives Role pvp', roleOf('P007'));
     log(roleOf('S006') === 'off', 'empty S006 derives Role off', roleOf('S006'));
-    const a001row = Array.prototype.find.call($('vilTable').querySelectorAll('tr[data-did]'), r => r.cells[1].textContent === 'A001');
+    const a001row = rowOf('A001');
     log(!!a001row.querySelector('.warnchip'), 'A001 (both kinds) shows a conflict chip');
 
     let rows = $('brTable').querySelectorAll('tr');
@@ -144,10 +153,205 @@ window.addEventListener('load', async () => {
     log(/Account/.test(mpRows[mpRows.length - 1].textContent), 'account totals row present');
     log($('mpTable').querySelectorAll('.vgroup').length >= 1, 'assignment listing grouped by village');
     log(W.JSON.parse(W.localStorage.getItem('pveData')).config.movementBudget === 40, 'Movement budget persisted');
+
+    // ════ data-safety / review-fix checks ════
+    const fire = (el, type) => el.dispatchEvent(new W.Event(type, { bubbles: true }));
+    const stored = () => W.JSON.parse(W.localStorage.getItem('pveData'));
+    const noTab = d => { d = JSON.parse(JSON.stringify(d)); delete d.config.activeTab; return d; }; // activeTab = UI state, not exported
+    const paste = async text => { $('pasteBox').value = text; $('btnPaste').click(); await tick(300); };
+    const status = () => $('dataStatus').textContent;
+    const alerts = []; W.alert = m => alerts.push(m); // never block headless on a dialog
+    let confirmAns = true, confirms = 0; W.confirm = () => { confirms++; return confirmAns; };
+    Array.prototype.find.call(D.querySelectorAll('#tabBar .tab-btn'), b => b.getAttribute('data-tab') === 'data').click();
+    await tick(50);
+
+    // SRI-pinned, deferred CDN solver still loads (needs network)
+    const solverTag = D.querySelector('script[src*="javascript-lp-solver"]');
+    log(!!solverTag && /^sha384-/.test(solverTag.getAttribute('integrity') || '') && solverTag.crossOrigin === 'anonymous' && solverTag.defer, 'solver script tag has SRI + crossorigin + defer');
+    log(!!W.solver && /loaded/.test($('solverStatus').textContent), 'ILP solver loads with the integrity check (needs network)', $('solverStatus').textContent.slice(0, 50));
+
+    // accessibility: labelled table controls, focusable conflict chip, focus kept across a Role re-render
+    const vilCtrls = Array.prototype.slice.call($('vilTable').querySelectorAll('input, select'));
+    log(vilCtrls.length > 0 && vilCtrls.every(e => (e.getAttribute('aria-label') || '').length > 3), 'every village-table control has an aria-label', vilCtrls.length + ' controls');
+    log(rowOf('A001').querySelector('.vts').getAttribute('aria-label') === 'A001 Tournament Square level', 'TS input label names village + field', rowOf('A001').querySelector('.vts').getAttribute('aria-label'));
+    log(/^A001 \S.* count$/.test(rowOf('A001').querySelector('.vtr').getAttribute('aria-label')), 'troop input label names village + unit', rowOf('A001').querySelector('.vtr').getAttribute('aria-label'));
+    const chip = rowOf('A001').querySelector('.warnchip');
+    log(chip.getAttribute('tabindex') === '0' && /^Role conflict: /.test(chip.getAttribute('aria-label') || '') && (chip.getAttribute('data-tip') || '').length > 10, 'conflict chip is focusable with an accessible detail');
+    let roleSel = rowOf('A004').querySelector('.vrole');
+    const a004Role = roleSel.value;
+    roleSel.focus(); roleSel.value = 'off'; fire(roleSel, 'change'); await tick(50);
+    log(D.activeElement && D.activeElement.classList.contains('vrole') && D.activeElement.closest('tr') === rowOf('A004') && D.activeElement !== roleSel, 'Role change re-render keeps keyboard focus on that row\'s Role', D.activeElement && D.activeElement.outerHTML.slice(0, 40));
+    roleSel = rowOf('A004').querySelector('.vrole'); roleSel.value = a004Role; fire(roleSel, 'change'); await tick(50);
+
+    // input write-back: the field always shows the value actually used
+    const gi = $('gIntSec');
+    gi.value = '240'; fire(gi, 'input'); fire(gi, 'change');
+    log(stored().config.intervalSec === 240 && gi.value === '240', 'valid interval stored', gi.value);
+    gi.value = '0'; fire(gi, 'input'); fire(gi, 'change');
+    log(gi.value === '240' && stored().config.intervalSec === 240 && /whole number of seconds/.test(status()), 'interval 0 -> field shows the effective 240 + a note', gi.value + ' / ' + status().slice(0, 60));
+    gi.value = ''; fire(gi, 'input'); fire(gi, 'change');
+    log(gi.value === '240', 'empty interval -> effective value written back', gi.value);
+    gi.value = '250.7'; fire(gi, 'input'); fire(gi, 'change');
+    log(gi.value === '250' && stored().config.intervalSec === 250, 'fractional interval -> whole seconds written back', gi.value);
+    const tr4 = rowOf('A004'), vtr = tr4.querySelector('.vtr'), vts = tr4.querySelector('.vts'), vart = tr4.querySelector('.vart');
+    const slot = vtr.getAttribute('data-slot'), vtrOld = vtr.value;
+    vtr.value = '-5'; fire(vtr, 'input'); fire(vtr, 'change');
+    log(vtr.value === '0' && stored().villages.find(v => v.name === 'A004').troops[slot] === 0, 'negative troop count clamps to 0', vtr.value);
+    vtr.value = '12.9'; fire(vtr, 'input'); fire(vtr, 'change');
+    log(vtr.value === '12', 'fractional troop count -> whole', vtr.value);
+    vtr.value = vtrOld; fire(vtr, 'input'); fire(vtr, 'change');
+    vts.value = '25'; fire(vts, 'input'); fire(vts, 'change');
+    log(vts.value === '20' && stored().config.perVillage['1004'].ts === 20, 'TS 25 clamps to 20', vts.value);
+    vts.value = '3.7'; fire(vts, 'input'); fire(vts, 'change');
+    log(vts.value === '3', 'TS 3.7 -> 3', vts.value);
+    vart.value = '0'; fire(vart, 'input'); fire(vart, 'change');
+    log(vart.value === '1', 'artefact 0 -> 1', vart.value);
+    vart.value = '1.5'; fire(vart, 'input'); fire(vart, 'change');
+    log(vart.value === '1.5' && stored().config.perVillage['1004'].artefact === 1.5, 'artefact 1.5 kept', vart.value);
+
+    // skip one oasis so the round trip covers skips too
+    const skipBtn = $('diffTable').querySelector('button.skip');
+    if (skipBtn) { skipBtn.click(); await tick(50); }
+    log(stored().skipped.length === 1, 'one oasis skipped before export');
+
+    // Export -> the full dataset, shaped for loadData (download intercepted)
+    let blob = null, dlName = '';
+    const origCreate = W.URL.createObjectURL, origClick = W.HTMLAnchorElement.prototype.click;
+    W.URL.createObjectURL = b => { blob = b; return 'blob:smoke'; };
+    W.HTMLAnchorElement.prototype.click = function () { dlName = this.download; };
+    $('btnExport').click(); await tick(50);
+    W.URL.createObjectURL = origCreate; W.HTMLAnchorElement.prototype.click = origClick;
+    log(/^farm-optimizer-ts30\.x3\.international\.travian\.com-\d{4}-\d{2}-\d{2}\.json$/.test(dlName), 'export file named by host + date', dlName);
+    const exported = blob ? await blob.text() : '';
+    const before = stored();
+    log(!!exported && JSON.parse(exported).villages.length === 5 && !('pendingTroops' in JSON.parse(exported)), 'export has the full dataset (no pendingTroops)');
+
+    // Import over existing data: cancel keeps everything (results included)
+    confirmAns = false; confirms = 0;
+    await paste(exported);
+    log(confirms === 1 && /cancelled/i.test(status()) && canon(stored()) === canon(before), 'full import asks first; Cancel keeps the current data', status().slice(0, 60));
+    log(!$('secRes').classList.contains('hidden') && $('pvpTable').innerHTML !== '', 'cancelled import leaves results alone');
+    // ...confirm replaces, and every result section is reset (no stale oasis / PvP / planner results)
+    confirmAns = true;
+    await paste(exported);
+    log(canon(noTab(stored())) === canon(noTab(before)), 'export -> import round trip is lossless');
+    log($('secRes').classList.contains('hidden') && $('secPlanRes').classList.contains('hidden') && $('pvpTable').innerHTML === '' && $('pvpCards').innerHTML === '', 'import resets oasis / PvP / planner results');
+    log(Array.prototype.every.call($('vilTable').querySelectorAll('.vplan'), c => c.textContent === '—'), 'village Plan column cleared after import');
+    log(D.querySelectorAll('#vilTable .vts')[1].value === '3' && $('gIntSec').value === '250', 'imported TS + interval shown in the UI');
+    // export -> Clear -> import: identical again
+    $('btnClear').click(); await tick(100);
+    log(W.localStorage.getItem('pveData') === null || stored().villages.length === 0, 'Clear empties the dataset');
+    confirms = 0;
+    await paste(exported);
+    log(confirms === 0 && canon(noTab(stored())) === canon(noTab(before)), 'export -> Clear -> import restores the identical dataset (no confirm on empty)');
+
+    // atomic import: bad input never touches the current data
+    const snap = W.localStorage.getItem('pveData');
+    await paste('{"villages": [ {"did": 1, ');
+    log(/Not valid JSON/.test(status()) && W.localStorage.getItem('pveData') === snap, 'malformed JSON -> error, data untouched', status().slice(0, 50));
+    await paste('[1, 2, 3]');
+    log(/Invalid data/.test(status()) && W.localStorage.getItem('pveData') === snap, 'wrong-shape JSON -> error, data untouched');
+    // an exception mid-ingest (here: forced in rendering) rolls the whole merge back
+    const origKinds = W.PVE.farmKinds;
+    W.PVE.farmKinds = () => { throw new Error('boom'); };
+    await paste('<div id="sidebarBoxVillageList"><div class="listEntry village" data-did="4242"><span class="name">NEW9</span><span class="coordinatesGrid"><span class="coordinateX">(1</span><span class="coordinateY">2)</span></span></div></div>');
+    W.PVE.farmKinds = origKinds;
+    log(/Could not read that data \(boom\)/.test(status()) && W.localStorage.getItem('pveData') === snap, 'exception during a page merge -> error + previous data restored', status().slice(0, 60));
+    await paste(exported); // re-render cleanly from the intact data
+    // null entries (farm list / target / village / oasis) are skipped, not a crash
+    const nullish = JSON.parse(exported);
+    nullish.farmLists = [null, nullish.farmLists[0], { name: 'x', targets: [null, { x: 1 }] }];
+    nullish.villages.push(null); nullish.oases.push(null); nullish.config.perVillage.bogus = null;
+    await paste(JSON.stringify(nullish));
+    log(/^Imported 5 villages, 66 oases, 2 farm lists/.test(status()) && stored().farmLists.length === 2, 'null entries skipped cleanly', status().slice(0, 60));
+
+    // non-string / foreign server: renders, and map links never leave travian.com
+    const hrefs = () => Array.prototype.map.call($('vilTable').querySelectorAll('a'), a => a.getAttribute('href'));
+    await paste(JSON.stringify(Object.assign(JSON.parse(exported), { server: 123 })));
+    log(/^Imported/.test(status()) && hrefs().length === 5 && hrefs().every(h => /^\/karte\.php\?x=-?\d+&y=-?\d+$/.test(h)), 'numeric server imports and renders (relative links)', hrefs()[0]);
+    await paste(JSON.stringify(Object.assign(JSON.parse(exported), { server: 'https://evil.example.com' })));
+    log(hrefs().every(h => h.indexOf('evil') < 0), 'foreign server never used for map links', hrefs()[0]);
+    await paste(exported);
+    log(hrefs().every(h => h.indexOf('https://ts30.x3.international.travian.com/karte.php?') === 0), 'travian server used for map links', hrefs()[0]);
+
+    // unresolved farm-list owner (villageDid null): its diff rows read as "Unknown village"
+    const orphan = JSON.parse(exported);
+    orphan.farmLists.push({ listId: 99, name: 'orphan', villageName: '', villageDid: null, targets: [{ x: 0, y: -72 }] }); // a free oasis no other list farms
+    await paste(JSON.stringify(orphan));
+    $('btnRun').click(); await tick(800);
+    const heads = Array.prototype.map.call($('diffTable').querySelectorAll('summary'), s => s.textContent);
+    log(heads.some(h => /^Unknown village/.test(h)) && !heads.some(h => /^(null|—)?\s*\(/.test(h)), 'null fromDid groups under "Unknown village"', JSON.stringify(heads.filter(h => /Unknown/.test(h)).map(h => h.slice(0, 20))));
+
+    // page merge: no-id farm lists dedupe on re-send; NBSP digit groups; bidi/U+2212 coords
+    await paste(exported);
+    const page = '<div id="sidebarBoxVillageList"><div class="listEntry village" data-did="1001"><span class="name">A001</span><span class="coordinatesGrid">'
+      + '<span class="coordinateX">(‭‭−18‬‬</span><span class="coordinateY">‭‭−93‬‬)</span></span></div></div>'
+      + '<div class="villageWrapper"><div class="villageName">A001</div><div class="farmListWrapper"><div class="farmListHeader"></div>'
+      + '<div class="farmListName"><span class="name">No-id list</span></div><table><tbody><tr class="slot"><td class="target"><a href="karte.php?x=-8&amp;y=-116">t</a></td></tr></tbody></table></div></div>'
+      + '<table id="troops"><thead><tr><td></td><td class="unit"><img class="unit u61"></td></tr></thead><tbody><tr><td class="villageName"><a href="?newdid=1001">A001</a></td><td>1 234</td></tr></tbody></table>';
+    $('btnRun').click(); await tick(500);
+    const nLists = stored().farmLists.length;
+    await paste(page);
+    log(stored().farmLists.length === nLists + 1 && /Page received/.test(status()), 'page adds its no-id farm list', stored().farmLists.length + ' lists');
+    log($('secRes').classList.contains('hidden'), 'page merge resets stale results');
+    await paste(page);
+    const noIdLists = stored().farmLists.filter(l => l.name === 'No-id list');
+    log(stored().farmLists.length === nLists + 1 && noIdLists.length === 1 && noIdLists[0].targets.length === 1 && noIdLists[0].villageDid === 1001, 're-sent no-id list replaces itself (no doubled targets)', stored().farmLists.length + ' lists');
+    const a1 = stored().villages.find(v => v.did === 1001);
+    log(a1.troops.t1 === 1234 && rowOf('A001').querySelector('.vtr[data-slot="t1"]').value === '1234', 'NBSP-grouped troop count "1 234" parses as 1234', String(a1.troops.t1));
+    log(a1.x === -18 && a1.y === -93, 'bidi-marked U+2212 coords still parse', a1.x + '|' + a1.y);
+
+    // Forget farm lists: lists only; villages / oases / skips / config stay
+    confirmAns = false; $('btnForget').click(); await tick(50);
+    log(stored().farmLists.length === nLists + 1, 'Forget farm lists asks first (Cancel keeps them)');
+    confirmAns = true; $('btnForget').click(); await tick(100);
+    const fg = stored();
+    log(fg.farmLists.length === 0 && fg.villages.length === 5 && fg.oases.length === 66 && fg.skipped.length === 1 && fg.config.intervalSec === 250, 'Forget farm lists clears lists only', status().slice(0, 50));
+
+    // oasis drop warning: a much smaller scan is applied but called out
+    await paste(exported);
+    W.postMessage({ pve: 'oases', oases: data.oases.slice(0, 50), server: data.server, scannedAt: '2026-06-03T00:00:00Z' }, '*'); await tick(300);
+    log(stored().oases.length === 50 && /16 fewer free oases than the previous scan \(66\)/.test(status()) && /rescan/.test(status()), 'oasis-count drop >10% warns', status().slice(0, 90));
+    W.postMessage({ pve: 'oases', oases: data.oases.slice(0, 64), server: 123 }, '*'); await tick(300);
+    log(stored().oases.length === 64 && !/fewer/.test(status()) && stored().server === data.server, 'growth: no warning; bad server keeps the previous one', stored().server);
+
+    // origin check: an opaque-origin (sandboxed) frame can't post data in
+    const vBefore = W.localStorage.getItem('pveData');
+    const sbPosted = new Promise(r => window.addEventListener('message', function h(e) { if (e.data === 'sb-posted') { window.removeEventListener('message', h); r(true); } }));
+    document.getElementById('sb').contentWindow.postMessage('go', '*');
+    // the sandboxed frame runs in its own process: its messages arrive in real time while
+    // --virtual-time-budget fast-forwards idle timers, so bound the wait with fetches (real time)
+    let posted = false; sbPosted.then(() => { posted = true; });
+    for (let i = 0; i < 100 && !posted; i++) await fetch('sample-data.json', { cache: 'no-store' }).then(r => r.text());
+    await tick(300);
+    log(posted && W.localStorage.getItem('pveData') === vBefore, 'messages from an opaque ("null") origin are ignored', posted ? '' : 'sandboxed frame never posted');
+
+    // storage failure: the banner shows on every save while it fails, and clears once one works
+    const origSet = W.Storage.prototype.setItem;
+    W.Storage.prototype.setItem = function () { throw new W.DOMException('full', 'QuotaExceededError'); };
+    const tsIn = rowOf('A001').querySelector('.vts');
+    tsIn.value = '2'; fire(tsIn, 'input');
+    log(!$('storeWarn').classList.contains('hidden'), 'storage failure shows the banner');
+    await paste(exported);
+    log(/NOT saved locally/.test(status()) && !$('storeWarn').classList.contains('hidden'), 'storage failure stays visible after an import (not overwritten)', status().slice(-80));
+    W.Storage.prototype.setItem = origSet;
+    const tsIn2 = rowOf('A001').querySelector('.vts'); tsIn2.value = '1'; fire(tsIn2, 'input');
+    log($('storeWarn').classList.contains('hidden'), 'banner clears once a save succeeds');
+
+    // a corrupt saved blob (non-string server) recovers on reload
+    const corrupt = Object.assign(JSON.parse(exported), { server: 123, farmLists: [null].concat(JSON.parse(exported).farmLists) });
+    W.localStorage.setItem('pveData', JSON.stringify(corrupt));
+    await new Promise(r => { f.addEventListener('load', r, { once: true }); W.location.reload(); });
+    await tick(300);
+    W = f.contentWindow; D = f.contentDocument;
+    log(!D.getElementById('secVil').classList.contains('hidden') && /Restored/.test(D.getElementById('dataStatus').textContent), 'corrupt saved blob (server: 123, null list) still boots', D.getElementById('dataStatus').textContent.slice(0, 40));
+    log(W.JSON.parse(W.localStorage.getItem('pveData')).server === '', 'restore normalises the bad server', String(W.JSON.parse(W.localStorage.getItem('pveData')).server));
   } catch (e) {
     log(false, 'EXCEPTION', e && (e.message + ' @ ' + (e.stack || '').split('\n')[1]));
+  } finally {
+    out.push(MK + 'DONE');
+    document.getElementById('out').textContent = out.join('\n');
+    document.title = MK + 'DONE';
   }
-  document.getElementById('out').textContent = out.join('\n');
-  document.title = 'SMOKE-DONE';
 });
 </script></body></html>

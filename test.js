@@ -6,12 +6,33 @@ const PVE = require('./optimizer.js');
 const { UNITS } = require('./cavalry.js');
 
 let pass = 0, fail = 0, skipped = 0;
+const pending = []; // async tests settle before the summary
+function ok(name) { pass++; console.log('  ok  ' + name); }
+function bad(name, e) { fail++; console.log('FAIL  ' + name + '\n      ' + (e && e.message)); }
 function t(name, fn) {
-  try { fn(); pass++; console.log('  ok  ' + name); }
-  catch (e) { fail++; console.log('FAIL  ' + name + '\n      ' + e.message); }
+  let r;
+  try { r = fn(); } catch (e) { bad(name, e); return; }
+  if (r && typeof r.then === 'function') pending.push(r.then(() => ok(name), e => bad(name, e)));
+  else ok(name);
 }
+process.on('unhandledRejection', e => bad('unhandled rejection', e));
 function tskip(name, why) { skipped++; console.log('SKIP  ' + name + ' (' + why + ')'); }
 function approx(a, b, eps) { assert(Math.abs(a - b) <= (eps || 1e-6), `${a} ≈ ${b}`); }
+// max count over every assignment (tiny instances only): each oasis to one village or none
+function bruteMaxCount(inst) {
+  const byOasis = inst.oases.map((o, oi) => inst.pairs.filter(p => p.oi === oi));
+  let best = 0;
+  (function rec(oi, used, count) {
+    if (count + (inst.oases.length - oi) <= best) return;
+    if (oi === inst.oases.length) { best = Math.max(best, count); return; }
+    rec(oi + 1, used, count);
+    byOasis[oi].forEach(p => {
+      if (used[p.vi] + p.cost > inst.villages[p.vi].budget) return;
+      used[p.vi] += p.cost; rec(oi + 1, used, count + 1); used[p.vi] -= p.cost;
+    });
+  })(0, inst.villages.map(() => 0), 0);
+  return best;
+}
 
 console.log('geometry/travel');
 t('torus wrap on -200..200 (size 401)', () => {
@@ -29,6 +50,9 @@ t('TS only applies beyond 20 fields', () => {
   const ts5_first20 = PVE.travelMinutes(20, 14, 1, 5);
   approx(PVE.travelMinutes(20, 14, 1, 0), ts5_first20); // first 20 unaffected by TS
   assert(ts5 < noTs, 'TS should reduce time for >20 trips');
+  // 28 f/h: first 20 fields = 42.857 min; the other 20 at 28 × (1 + 0.2·5) = 56 f/h = 21.429 min
+  approx(ts5, 20 / 28 * 60 + 20 / 56 * 60);
+  approx(ts5, 64.2857142857, 1e-6);
 });
 t('artefact multiplies whole trip', () => {
   approx(PVE.travelMinutes(40, 14, 2, 0), PVE.travelMinutes(40, 28, 1, 0)); // 2x artefact == 2x base
@@ -36,6 +60,25 @@ t('artefact multiplies whole trip', () => {
 t('oasis cost = ceil(2*travel/interval)', () => {
   assert.strictEqual(PVE.oasisCost(60, 5), 24);  // ceil(120/5)
   assert.strictEqual(PVE.oasisCost(61, 5), 25);  // ceil(122/5)=24.4->25
+});
+t('wave counts are float-safe: an exact multiple never rounds up an extra wave', () => {
+  // speed 9 (18 f/h), 10 fields = 33.333… min; 32 s interval: 2·t/I is 125 in exact math but
+  // 125.00000000000001 in floats — a bare Math.ceil said 126.
+  const tmin = PVE.travelMinutes(10, 9, 1, 0);
+  assert.strictEqual(PVE.oasisCost(tmin, 32 / 60), 125);
+  assert.strictEqual(PVE.outgoingMovements(tmin, 32 / 60), 63); // ceil(62.5)
+  assert.strictEqual(PVE.oasisCost(0, 5), 0);
+});
+t('a zero / negative / NaN interval costs Infinity (never NaN, never a free oasis)', () => {
+  [0, -5, NaN, undefined].forEach(iv => {
+    assert.strictEqual(PVE.oasisCost(10, iv), Infinity, 'oasisCost interval ' + iv);
+    assert.strictEqual(PVE.outgoingMovements(10, iv), Infinity, 'outgoingMovements interval ' + iv);
+  });
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }], farmLists: [] };
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 0, artefact: 1 } } });
+  assert.strictEqual(inst.pairs.length, 0, 'no pair from a village with a broken interval');
 });
 
 console.log('oasis typing');
@@ -106,10 +149,10 @@ t('movements = OUTBOUND waves only; rainbows = round trip (returns show in-game 
   assert.strictEqual(r.outUsed[0], 3, 'per-village outgoing movements reported');
 });
 t('tight budget forces choices; greedy maximizes count & respects capacity', () => {
-  // 2 villages, budget 3 each; 4 oases. v0 cheap to all (cost1), v1 cost2.
+  // 2 villages, budget 1 and 2; 4 oases that each cost 1 (interval 60) -> at most 3 fit.
   const data = { mapRadius: 200,
-    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 3 } },
-               { did: 2, name: 'B', x: 2, y: 0, troops: { t6: 3 } }],
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 1 } },
+               { did: 2, name: 'B', x: 2, y: 0, troops: { t6: 2 } }],
     oases: [ { x: 0, y: 1, bonuses: [{res:'crop',pct:25}] },
              { x: 1, y: 0, bonuses: [{res:'crop',pct:25}] },
              { x: 2, y: 1, bonuses: [{res:'crop',pct:25}] },
@@ -122,7 +165,9 @@ t('tight budget forces choices; greedy maximizes count & respects capacity', () 
   });
   const r = PVE.solve(inst, {});
   inst.villages.forEach((v, vi) => assert(r.used[vi] <= v.budget, 'within budget'));
-  assert(r.count >= 1 && r.count <= inst.oases.length);
+  assert.strictEqual(inst.maxPossible, 4, 'every oasis is affordable on its own');
+  assert.strictEqual(r.count, bruteMaxCount(inst), 'count = brute-force optimum');
+  assert.strictEqual(r.count, 3, 'budget 1 + 2 at cost 1 each');
 });
 
 console.log('plan diff');
@@ -271,7 +316,8 @@ if (realSolver) {
     const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
       resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 60, artefact: 1 } } });
     const r = PVE.solveExact(inst, realSolver, 5000);
-    assert(r && r.count >= 1, 'solved with timeout set');
+    assert(r, 'solved with timeout set');
+    assert.strictEqual(r.count, 2, 'budget 2, three cost-1 oases -> exactly 2');
     inst.villages.forEach((v, vi) => assert(r.used[vi] <= v.budget, 'within budget'));
   });
 } else {
@@ -819,5 +865,287 @@ t('pooled budget on the sample data: the SUM stays ≤ N (individual villages un
   assert(r.count > 0, 'something is farmed at N=25');
 });
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed' + (skipped ? ', ' + skipped + ' skipped' : ''));
-process.exit(fail ? 1 : 0);
+console.log('plan diff — reasons & duplicates');
+const PV = { ts: 0, interval: 5, artefact: 1 };
+function diffFor(data, dids, extra) {
+  const perVillage = {}; dids.forEach(d => { perVillage[d] = PV; });
+  const inst = PVE.buildInstance(data, Object.assign({ units: UNITS.huns, selectedSlots: ['t6'], includedDids: dids,
+    resourceFilter: { wood: true, clay: true, iron: true, crop: true }, perVillage }, extra || {}));
+  const r = PVE.solve(inst, {});
+  return { inst, r, rows: PVE.planDiff(data, inst, r, []) };
+}
+function dupData(lists, troopsA, troopsB) {
+  return { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: troopsA } }, { did: 2, name: 'B', x: 10, y: 0, troops: { t6: troopsB } }],
+    oases: [{ x: 9, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }], farmLists: lists };
+}
+t('same-village duplicate: kept on its village -> one keep + one remove of the second entry', () => {
+  const { rows } = diffFor(dupData([{ listId: 1, name: 'A1', villageDid: 1, targets: [{ x: 9, y: 0 }] },
+                                    { listId: 2, name: 'A2', villageDid: 1, targets: [{ x: 9, y: 0 }] }], 100, 0), [1, 2]);
+  assert.deepStrictEqual(rows.map(x => x.status), ['keep', 'remove']);
+  assert.strictEqual(rows[1].fromDid, 1);
+  assert(/already farms it from another entry/.test(rows[1].reason) && /A2/.test(rows[1].reason), 'got: ' + rows[1].reason);
+});
+t('same-village duplicate: moved away -> one move + one remove (the oasis is not left farmed twice)', () => {
+  const { rows } = diffFor(dupData([{ listId: 1, name: 'A1', villageDid: 1, targets: [{ x: 9, y: 0 }, { x: 9, y: 0 }] }], 100, 100), [1, 2]);
+  assert.deepStrictEqual(rows.map(x => x.status), ['move', 'remove']);
+  assert.strictEqual(rows[0].fromDid, 1); assert.strictEqual(rows[0].toDid, 2);
+  assert(/duplicate — keep only on B/.test(rows[1].reason), 'got: ' + rows[1].reason);
+});
+t('cross-village duplicate: the other holder\'s entry is removed with a "keep only on" reason', () => {
+  const { rows } = diffFor(dupData([{ listId: 1, name: 'LA', villageDid: 1, targets: [{ x: 9, y: 0 }] },
+                                    { listId: 2, name: 'LB', villageDid: 2, targets: [{ x: 9, y: 0 }] }], 100, 100), [1, 2]);
+  assert.deepStrictEqual(rows.map(x => x.status), ['keep', 'remove']);
+  assert.strictEqual(rows[0].toDid, 2);
+  assert.strictEqual(rows[1].fromDid, 1);
+  assert.strictEqual(rows[1].reason, 'duplicate — keep only on B (list "LA")');
+});
+t('over-capacity current target -> remove "over capacity / not optimal"', () => {
+  // budget 1, two cost-1 oases both on A's list: one stays, the other cannot.
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 1 } }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }, { x: 0, y: 1, bonuses: [{ res: 'crop', pct: 25 }] }],
+    farmLists: [{ listId: 1, name: 'L', villageDid: 1, targets: [{ x: 1, y: 0 }, { x: 0, y: 1 }] }] };
+  const { rows } = diffFor(data, [1]);
+  assert.deepStrictEqual(rows.map(x => x.status).sort(), ['keep', 'remove']);
+  assert.strictEqual(rows.find(x => x.status === 'remove').reason, 'over capacity / not optimal');
+});
+t('a current target whose bonus never parsed -> remove "bonus unreadable", not "resource filter"', () => {
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }],
+    oases: [{ x: 1, y: 0, bonuses: [] }], farmLists: [{ listId: 1, name: 'L', villageDid: 1, targets: [{ x: 1, y: 0 }] }] };
+  const { inst, rows } = diffFor(data, [1]);
+  assert.strictEqual(inst.oases.length, 0, 'no bucket -> not a candidate');
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].reason, 'bonus unreadable — rescan to classify it');
+});
+t('an unresolved list owner still produces a move row (fromDid null — the UI says "unknown village")', () => {
+  const { rows } = diffFor(dupData([{ listId: 1, name: '?', villageDid: null, targets: [{ x: 9, y: 0 }] }], 100, 100), [1, 2]);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].status, 'move'); assert.strictEqual(rows[0].fromDid, null); assert.strictEqual(rows[0].toDid, 2);
+});
+t('oasis ties keep the current holder (no churn when either village is equally good)', () => {
+  // both oases are 5 fields from A and from B; B farms them today -> the plan must keep them on B.
+  const data = { mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t6: 100 } }, { did: 2, name: 'B', x: 6, y: 0, troops: { t6: 100 } }],
+    oases: [{ x: 3, y: 4, bonuses: [{ res: 'crop', pct: 25 }] }, { x: 3, y: -4, bonuses: [{ res: 'wood', pct: 25 }] }],
+    farmLists: [{ listId: 2, name: 'B', villageDid: 2, targets: [{ x: 3, y: 4 }, { x: 3, y: -4 }] }] };
+  const { inst, r, rows } = diffFor(data, [1, 2]);
+  assert(inst.pairs.every(p => p.cost === inst.pairs[0].cost), 'sanity: every pair costs the same');
+  assert.strictEqual(r.count, 2); assert.strictEqual(r.kept, 2, 'both current entries kept');
+  assert.deepStrictEqual(rows.map(x => x.status), ['keep', 'keep']);
+  rows.forEach(x => assert.strictEqual(x.toDid, 2));
+});
+t('sample data: every current free-oasis entry and every planned oasis is accounted for exactly once', () => {
+  const data = JSON.parse(fs.readFileSync(path.join(__dirname, 'sample-data.json')));
+  const inst = PVE.buildInstance(data, {
+    units: UNITS.huns, selectedSlots: ['t4','t5','t6'], includedDids: data.villages.map(v => v.did),
+    resourceFilter: { wood: true, clay: true, iron: true, crop: true },
+    perVillage: { 1001: { ts: 10, interval: 5, artefact: 1 }, 1004: { ts: 8, interval: 5, artefact: 1 },
+                  1006: { ts: 8, interval: 5, artefact: 1 } } });
+  const r = PVE.solve(inst, {});
+  const rows = PVE.planDiff(data, inst, r, []);
+  const k = (x, y) => x + '|' + y;
+  const free = new Set(data.oases.map(o => k(o.x, o.y)));
+  const entries = {}; // key -> [did] per list entry
+  data.farmLists.forEach(l => (l.targets || []).forEach(tg => {
+    if (free.has(k(tg.x, tg.y))) (entries[k(tg.x, tg.y)] = entries[k(tg.x, tg.y)] || []).push(l.villageDid);
+  }));
+  const planned = {};
+  Object.keys(r.assign).forEach(oi => { const o = inst.oases[oi]; planned[k(o.x, o.y)] = inst.villages[r.assign[oi]].did; });
+  const byKey = {};
+  rows.forEach(x => (byKey[k(x.x, x.y)] = byKey[k(x.x, x.y)] || []).push(x));
+  Object.keys(planned).forEach(key => {
+    const act = (byKey[key] || []).filter(x => x.status !== 'remove');
+    assert.strictEqual(act.length, 1, key + ': one keep/add/move');
+    assert.strictEqual(act[0].toDid, planned[key], key + ': to the planned village');
+    const cur = entries[key] || [];
+    if (act[0].status === 'add') assert.strictEqual(cur.length, 0, key + ': add only when nobody farms it');
+    if (act[0].status === 'keep') assert(cur.includes(planned[key]), key + ': keep only on a current holder');
+    if (act[0].status === 'move') { assert(!cur.includes(planned[key]), key + ': move only to a new holder');
+      assert(cur.includes(act[0].fromDid), key + ': move from a current holder'); }
+  });
+  Object.keys(entries).forEach(key => {
+    const covering = (byKey[key] || []).filter(x => x.status === 'keep' || x.status === 'move' || x.status === 'remove');
+    assert.strictEqual(covering.length, entries[key].length, key + ': each current entry gets exactly one row');
+    covering.filter(x => x.status === 'remove').forEach(x => assert(entries[key].includes(x.fromDid), key + ': remove from a holder'));
+  });
+  const st = {}; rows.forEach(x => { st[x.status] = (st[x.status] || 0) + 1; });
+  assert(st.keep > 0 && st.add > 0, 'sample exercises keep and add: ' + JSON.stringify(st));
+  assert(!rows.some(x => x.status === 'remove' && x.x === -50 && x.y === -50), 'non-free-oasis target ignored');
+});
+
+console.log('solver — tie-breaks, ILP model, exact gate');
+t('greedyPairs: equal cost -> the current holder first, then the shorter distance', () => {
+  const mk = cur => ({ villages: [{ did: 1, name: 'V', budget: 1 }], oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }], maxPossible: 2,
+    pairs: [{ oi: 0, vi: 0, cost: 1, out: 1, dist: 5, travelMin: 5, cur }, { oi: 1, vi: 0, cost: 1, out: 1, dist: 2, travelMin: 2 }] });
+  assert.deepStrictEqual(PVE.greedyPairs(mk(false)).assign, { 1: 0 }, 'shorter distance wins');
+  assert.deepStrictEqual(PVE.greedyPairs(mk(true)).assign, { 0: 0 }, 'a current entry beats distance');
+});
+t('solvePool: equal outgoing cost -> fewer rainbows first, per oasis and across oases', () => {
+  const inst = { villages: [{ did: 1, name: 'A', budget: 9 }, { did: 2, name: 'B', budget: 9 }],
+    oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }], maxPossible: 2,
+    pairs: [{ oi: 0, vi: 0, cost: 3, out: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 2, out: 1, dist: 9, travelMin: 9 },
+            { oi: 1, vi: 0, cost: 1, out: 1, dist: 9, travelMin: 9 }] };
+  const r = PVE.solvePool(inst, 1);
+  assert.strictEqual(r.count, 1);
+  assert.deepStrictEqual(r.assign, { 1: 0 }, 'pool of 1 goes to the 1-rainbow oasis');
+  assert.strictEqual(PVE.solvePool(inst, 2).assign[0], 1, 'oasis 0 served by B (2 rainbows) over A (3)');
+});
+function gateInst(n) { // n cost-1 pairs, budget 10 -> greedy 10 < maxPossible n
+  const oases = [], pairs = [];
+  for (let i = 0; i < n; i++) { oases.push({ x: i, y: 0 }); pairs.push({ oi: i, vi: 0, cost: 1, out: 1, dist: i + 1, travelMin: i + 1 }); }
+  return { villages: [{ did: 1, name: 'V', budget: 10 }], oases, pairs, maxPossible: n };
+}
+t('the exact solver runs at ≤ 50 pairs, not at 51, and not at all with maxExactPairs 0', () => {
+  let calls = 0; const spy = { Solve() { calls++; return { feasible: false }; } };
+  PVE.solve(gateInst(50), { solver: spy }); assert.strictEqual(calls, 1, '50 pairs -> exact tried');
+  const big = PVE.solve(gateInst(51), { solver: spy }); assert.strictEqual(calls, 1, '51 pairs -> skipped');
+  assert(/too large for exact: 51 pairs/.test(big.method), big.method);
+  const off = PVE.solve(gateInst(10 + 5), { solver: spy, maxExactPairs: 0 });
+  assert.strictEqual(calls, 1, 'maxExactPairs 0 -> never');
+  assert(/turned off/.test(off.method), off.method);
+  PVE.solve(gateInst(60), { solver: spy, maxExactPairs: 60 }); assert.strictEqual(calls, 2, 'the limit is configurable');
+});
+t('ILP model shape: maximize, one constraint per oasis (≤1) and per village (≤ budget), binaries, default timeout 10 s', () => {
+  const inst = {
+    villages: [{ did: 1, name: 'V1', budget: 1 }, { did: 2, name: 'V2', budget: 4 }],
+    oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }, { x: 4, y: 0 }],
+    pairs: [
+      { oi: 0, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 0, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 1, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 3, out: 2, dist: 3, travelMin: 3 },
+      { oi: 2, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+      { oi: 3, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+      { oi: 4, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 } ],
+    maxPossible: 5 };
+  let model = null;
+  PVE.solve(inst, { solver: { Solve(m) { model = m; return { feasible: false }; } } });
+  assert(model, 'exact path ran');
+  assert.strictEqual(model.opType, 'max'); assert.strictEqual(model.optimize, 'score');
+  assert.strictEqual(model.timeout, 10000, 'default timeout');
+  inst.oases.forEach((o, oi) => assert.deepStrictEqual(model.constraints['o' + oi], { max: 1 }));
+  inst.villages.forEach((v, vi) => assert.deepStrictEqual(model.constraints['v' + vi], { max: v.budget }));
+  inst.pairs.forEach((p, idx) => {
+    const x = model.variables['x' + idx];
+    assert.strictEqual(x['o' + p.oi], 1); assert.strictEqual(x['v' + p.vi], p.cost, 'budget row uses the rainbow cost');
+    assert.strictEqual(model.binaries['x' + idx], 1);
+    assert(x.score > 0, 'every placement is worth more than none — count dominates');
+  });
+  assert(model.variables.x0.score > model.variables.x1.score, 'cheaper pair scores higher');
+  const sum = Object.keys(model.variables).reduce((s, k) => s + (1 - model.variables[k].score), 0);
+  assert(sum < 1, 'all cost penalties together weigh less than one oasis');
+});
+t('solveExact checks EVERY village for a leaked relaxation (not just the first)', () => {
+  // V1 is fine; V2 (budget 1) gets both of its 0.99 variables rounded up -> 2 > 1.
+  const inst = { villages: [{ did: 1, name: 'V1', budget: 1 }, { did: 2, name: 'V2', budget: 1 }],
+    oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }], maxPossible: 3,
+    pairs: [{ oi: 0, vi: 0, cost: 1, out: 1, dist: 1, travelMin: 1 }, { oi: 1, vi: 1, cost: 1, out: 1, dist: 1, travelMin: 1 },
+            { oi: 2, vi: 1, cost: 1, out: 1, dist: 2, travelMin: 2 }] };
+  const leaky = { Solve(m) { const r = { feasible: true }; Object.keys(m.variables).forEach(k => { r[k] = 0.99; }); return r; } };
+  assert.strictEqual(PVE.solveExact(inst, leaky, 1000), null);
+  const r = PVE.solve(inst, { solver: leaky });
+  assert(/greedy/.test(r.method), r.method);
+  assert.strictEqual(r.count, 2);
+  r.used.forEach((u, vi) => assert(u <= inst.villages[vi].budget));
+});
+t('an exact result that only ties greedy is accepted (and labelled exact)', () => {
+  const inst = gateInst(12);
+  const tie = { Solve(m) { const r = { feasible: true }; for (let i = 0; i < 10; i++) r['x' + i] = 1; return r; } };
+  const r = PVE.solve(inst, { solver: tie });
+  assert.strictEqual(r.count, 10);
+  assert.strictEqual(r.method, 'exact ILP (jsLPSolver)');
+  assert.strictEqual(r.optimal, true);
+});
+
+console.log('pvp rebalancer — repair choices, tolerance, bad input');
+function pv(did, name, x, y, stocks, interval) {
+  return { did, name, x, y, ts: 0, interval: interval === undefined ? 1000 : interval, artefact: 1, stocks };
+}
+// speed 30 -> 60 f/h -> travel minutes == fields
+function farm(fi, x, y, comp, curVi) { return { fi, x, y, comp, speed: 30, curVi }; }
+t('keep bias default is 2 min, and a saving of exactly the tolerance moves', () => {
+  // farm 2 fields from A, 1 from B: saving 1 field = 1.875 min for Steppe Riders, 2.14 min for Marauders
+  const mk = slot => PVE.buildPvpInstance({ mapRadius: 200,
+    villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: { t4: 100, t6: 100 } }, { did: 2, name: 'B', x: 3, y: 0, troops: { t4: 100, t6: 100 } }],
+    oases: [], farmLists: [{ listId: 1, name: 'L', villageDid: 1, targets: [{ x: 2, y: 0, comp: { [slot]: 5 } }] }] },
+    { units: UNITS.huns, pvpDids: [1, 2], perVillage: { 1: { ts: 0, interval: 60, artefact: 1 }, 2: { ts: 0, interval: 60, artefact: 1 } } });
+  assert.strictEqual(PVE.pvpRebalance(mk('t4'), {}).rows[0].status, 'keep', '1.875 < 2');
+  assert.strictEqual(PVE.pvpRebalance(mk('t6'), {}).rows[0].status, 'move', '2.14 ≥ 2');
+  const gain = PVE.travelMinutes(2, 14, 1, 0) - PVE.travelMinutes(1, 14, 1, 0);
+  assert.strictEqual(PVE.pvpRebalance(mk('t6'), { toleranceMin: gain }).rows[0].status, 'move', 'boundary is inclusive');
+  assert.strictEqual(PVE.pvpRebalance(mk('t6'), { toleranceMin: gain + 1e-9 }).rows[0].status, 'keep');
+});
+t('repair takes the farm\'s NEAREST receiver that fits (a full nearer one is skipped)', () => {
+  const inst = { radius: 200, villages: [pv(1, 'A', 0, 0, { t1: 0 }), pv(2, 'B', 9, 0, { t1: 4 }),
+    pv(3, 'C', 12, 0, { t1: 10 }), pv(4, 'D', 20, 0, { t1: 10 })], farms: [farm(0, 10, 0, { t1: 5 }, 0)] };
+  const r = PVE.pvpRebalance(inst, { toleranceMin: Infinity }); // no improvement moves
+  assert.strictEqual(r.rows[0].toDid, 3, 'C (2 away) — B is nearer but too small, D farther');
+  assert.strictEqual(r.moves, 1); assert.strictEqual(r.shortfalls.length, 0);
+});
+t('repair prefers ONE farm whose move clears the overload over several small ones', () => {
+  // A stocks 50 and holds a 1-troop farm (right next to B) and a 100-troop one. Moving the small
+  // one first (nearest the receiver) fixes nothing and costs a second move.
+  const inst = { radius: 200, villages: [pv(1, 'A', 0, 0, { t1: 50 }), pv(2, 'B', 3, 0, { t1: 1000 })],
+    farms: [farm(0, 1, 0, { t1: 1 }, 0), farm(1, -10, 0, { t1: 100 }, 0)] };
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows[0].status, 'keep', 'small farm stays');
+  assert.strictEqual(r.rows[1].status, 'move', 'big farm moves');
+  assert.strictEqual(r.moves, 1); assert.strictEqual(r.shortfalls.length, 0);
+});
+t('a repair that turns out unnecessary is undone (the farm goes home)', () => {
+  // Round 1: A (stock 10) is over; only the small farm s can move (to R). The big one L can't —
+  // B is full with z. Phase B moves z beside D, freeing B. Round 2: L moves to B, which alone
+  // clears A — so s, equally close to home, goes back instead of staying moved.
+  const inst = { radius: 200,
+    villages: [pv(1, 'A', 0, 0, { t1: 10 }), pv(2, 'R', 2, 0, { t1: 5 }), pv(3, 'B', 8, 0, { t1: 12 }), pv(4, 'D', 31, 0, { t1: 11 })],
+    farms: [farm(0, 1, 0, { t1: 2 }, 0), farm(1, 5, 0, { t1: 12 }, 0), farm(2, 30, 0, { t1: 11 }, 2)] };
+  const r = PVE.pvpRebalance(inst, {});
+  assert.strictEqual(r.rows[0].status, 'keep', 's back home');
+  assert.strictEqual(r.rows[1].toDid, 3, 'L to B');
+  assert.strictEqual(r.rows[2].toDid, 4, 'z to D');
+  assert.strictEqual(r.moves, 2); assert.strictEqual(r.shortfalls.length, 0);
+});
+t('toleranceMin 0 does not bounce a tie between villages (result independent of maxPasses)', () => {
+  const inst = { radius: 200, villages: [pv(1, 'A', -5, 0, { t1: 5 }), pv(2, 'B', 5, 0, { t1: 5 })],
+    farms: [farm(0, 0, 7, { t1: 1 }, 0)] };
+  [24, 25].forEach(mp => {
+    const r = PVE.pvpRebalance(inst, { toleranceMin: 0, maxPasses: mp });
+    assert.strictEqual(r.rows[0].status, 'keep', 'maxPasses ' + mp); assert.strictEqual(r.moves, 0);
+  });
+});
+t('a broken interval is reported as a shortfall, never read as "fits"', () => {
+  const nan = PVE.pvpRebalance({ radius: 200, villages: [pv(1, 'A', 0, 0, { t1: 1 }, NaN)],
+    farms: [farm(0, 1, 0, { t1: 50 }, 0)] }, {});
+  assert.strictEqual(nan.shortfalls.length, 1, 'NaN interval -> shortfall');
+  const zero = PVE.pvpRebalance({ radius: 200, villages: [pv(1, 'A', 0, 0, { t1: 100 }, 0), pv(2, 'B', 5, 0, { t1: 100 }, 5)],
+    farms: [farm(0, 1, 0, { t1: 1 }, 0), farm(1, 2, 0, { t1: 1 }, 0)] }, {});
+  assert(zero.shortfalls.some(s => s.did === 1), 'interval 0 -> shortfall on A');
+  zero.rows.forEach(x => assert(!Number.isNaN(x.waves), 'no NaN waves'));
+  assert.strictEqual(zero.moves, 0, 'farms with an unknown demand are not moved');
+});
+t('big overload stays fast (3000 farms × 20 villages, all on one village)', () => {
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const villages = []; for (let i = 0; i < 20; i++) villages.push(pv(i + 1, 'V' + i, Math.floor(rnd() * 200) - 100, Math.floor(rnd() * 200) - 100,
+    { t1: i === 0 ? 100 : 1e6, t5: i === 0 ? 100 : 1e6 }, 5));
+  const farms = []; for (let i = 0; i < 3000; i++) farms.push({ fi: i, x: Math.floor(rnd() * 401) - 200, y: Math.floor(rnd() * 401) - 200, comp: { t1: 5, t5: 2 }, speed: 6, curVi: 0 });
+  const t0 = Date.now(); const r = PVE.pvpRebalance({ radius: 200, villages, farms }, {}); const ms = Date.now() - t0;
+  assert.strictEqual(r.shortfalls.length, 0);
+  assert(ms < 8000, 'took ' + ms + ' ms');
+});
+
+console.log('page wiring (index.html)');
+t('index.html inline scripts parse, and both local script tags carry the same ?v= cache-bust', () => {
+  const vm = require('vm');
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+  assert(inline.length > 0, 'found the inline app script');
+  inline.forEach((code, i) => { try { new vm.Script(code, { filename: 'index.html#inline' + i }); } catch (e) { throw new Error('inline script ' + i + ': ' + e.message); } });
+  const v = [...html.matchAll(/<script[^>]+src="(cavalry|optimizer)\.js\?v=([^"]+)"/g)].map(m => m[1] + '=' + m[2]);
+  assert.strictEqual(v.length, 2, 'both local scripts versioned: ' + v);
+  assert.strictEqual(v[0].split('=')[1], v[1].split('=')[1], 'same version: ' + v);
+});
+
+Promise.all(pending).then(() => {
+  const ran = pass + fail;
+  console.log('\n' + pass + ' passed, ' + fail + ' failed' + (skipped ? ', ' + skipped + ' skipped' : ''));
+  if (!ran) console.log('FAIL  no tests ran');
+  process.exit(fail || !ran ? 1 : 0);
+});

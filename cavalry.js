@@ -1,4 +1,4 @@
-// Cavalry / unit data for Travian T4.6 (x3). Generated from Ash-Warden troops_t46.json,
+// Cavalry / unit data for Travian T4.6 (x3). Generated from a T4.6 troop table (troops_t46.json),
 // with Huns Marksman speed corrected 15->16 (verified x3 vs Kirilloid t4.fs/units.ts, 2026-06-02).
 // speed = BASE fields/hour at 1x; on a speed server multiply by 2 (NOT by server factor).
 // type: 'i' infantry, 'c' cavalry. slot maps to in-game t1..tN.

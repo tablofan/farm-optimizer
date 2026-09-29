@@ -50,8 +50,9 @@
     button.primary { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); font-weight: 600; }
     button.primary:hover { background: #e4b966; border-color: #e4b966; }
     button.mini { padding: 2px 10px; font-size: var(--fs-cap); border-radius: 6px; }
-    #btnClear { background: transparent; border-color: transparent; color: var(--ink-faint); margin-left: auto; }
-    #btnClear:hover { background: transparent; border-color: var(--line-strong); color: var(--ink); }
+    #btnForget, #btnClear { background: transparent; border-color: transparent; color: var(--ink-faint); }
+    #btnForget { margin-left: auto; }
+    #btnForget:hover, #btnClear:hover { background: transparent; border-color: var(--line-strong); color: var(--ink); }
     textarea, input[type=number], select {
       font: inherit; font-size: var(--fs-ui); background: var(--inset); color: var(--ink);
       border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 8px;
@@ -144,7 +145,13 @@
     .tab-btn.on { background: transparent; color: var(--ink); border-bottom-color: var(--gold); }
     .tabpane { display: none; }
     .tabpane.on { display: block; }
-    .warnchip { color: var(--err); cursor: help; margin-left: 4px; }
+    .warnchip { color: var(--err); cursor: help; margin-left: 4px; position: relative; }
+    /* conflict detail on hover, keyboard focus or tap (focusable chip) — a title alone is mouse-only */
+    .warnchip:hover::after, .warnchip:focus::after {
+      content: attr(data-tip); position: absolute; left: 0; top: 100%; margin-top: 4px; z-index: 2; width: 300px;
+      white-space: normal; background: var(--head); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px;
+      padding: 6px 9px; font-size: var(--fs-cap); font-weight: 400; line-height: 1.45; box-shadow: 0 8px 20px -8px rgba(0, 0, 0, .7);
+    }
     select.vrole { padding: 3px 22px 3px 8px; }
     td.short { color: var(--err); font-weight: 600; }
     .vgroup { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--inset); }
@@ -170,6 +177,7 @@
   <div class="container">
     <h1>Farm Optimizer</h1>
     <div class="sub">Travian (x3, T4.6) · oasis farming + PvP farm rebalancing, planned per village</div>
+    <div class="callout hidden" id="storeWarn" role="alert" style="margin-bottom:14px">⚠ Could not save locally (browser storage full or blocked) — your latest changes live only in this tab. Use <b>Export data (.json)</b> on the Data tab before reloading.</div>
 
     <div class="tabs" id="tabBar">
       <button class="tab-btn" data-tab="data">Data &amp; villages</button>
@@ -192,11 +200,13 @@
           <button id="btnFile" class="primary">Import file (.json / .htm)…</button>
           <input type="file" id="fileInput" accept=".json,.htm,.html,application/json,text/html" class="hidden">
           <button id="btnSample">Load sample</button>
-          <span class="muted">Tribe:</span> <select id="tribeSel"></select>
+          <button id="btnExport">Export data (.json)</button>
+          <span class="muted">Tribe:</span> <select id="tribeSel" aria-label="Tribe"></select>
+          <button id="btnForget" title="Drop the stored farm lists only (e.g. lists deleted in-game) — villages, oases, settings and skips stay">Forget farm lists</button>
           <button id="btnClear">Clear data</button>
         </div>
         <div class="status" id="dataStatus">Waiting for data…</div>
-        <div class="row" style="margin-top:12px"><textarea id="pasteBox" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
+        <div class="row" style="margin-top:12px"><textarea id="pasteBox" aria-label="Paste page HTML or collector JSON" placeholder="paste a saved page's HTML, or collector JSON…"></textarea></div>
         <div class="row"><button id="btnPaste">Load pasted</button></div>
       </div>
 
@@ -204,14 +214,14 @@
         <div class="section-title">Villages &amp; roles <span class="muted" style="text-transform:none;letter-spacing:0">— a village farms oases (pve), holds PvP farms (pvp), or neither (off); troop counts are editable if not auto-filled from a troops page</span></div>
         <div class="row" style="margin-bottom:10px">
           <span class="muted">Sending interval (one value, all villages):</span>
-          <input type="number" id="gIntSec" value="300" min="1" step="1"> <span class="muted">seconds</span>
+          <input type="number" id="gIntSec" value="300" min="1" step="1" aria-label="Sending interval (seconds)"> <span class="muted">seconds</span>
           <span class="muted push">Apply to all villages:</span>
-          <span class="muted">TS</span> <input type="number" id="gTs" value="0" min="0" max="20">
-          <span class="muted">Artefact ×</span> <input type="number" id="gArt" value="1" min="0.1" step="0.1">
+          <span class="muted">TS</span> <input type="number" id="gTs" value="0" min="0" max="20" step="1" aria-label="Tournament Square level for all villages">
+          <span class="muted">Artefact ×</span> <input type="number" id="gArt" value="1" min="0.1" step="0.1" aria-label="Speed artefact multiplier for all villages">
           <button id="btnApplyAll">Apply</button>
         </div>
         <div class="scroll"><table id="vilTable"></table></div>
-        <p class="muted" style="margin-top:8px">Budget / Now / Plan count rainbows — one of each selected cavalry type. ⚠ marks a stored Role contradicted by the current farm lists (hover it for details).</p>
+        <p class="muted" style="margin-top:8px">Budget / Now / Plan count rainbows — one of each selected cavalry type. ⚠ marks a stored Role contradicted by the current farm lists (hover, tap or focus it for details).</p>
       </div>
     </div>
 
@@ -304,10 +314,13 @@
        fresh index.html paired with a stale cached script fails silently (seen live: a cached
        pre-solvePool optimizer.js made the Movement planner's Calculate a no-op). Bump BOTH when
        either file changes; the boot guard below catches a mismatch that slips through anyway. -->
-  <script src="cavalry.js?v=3"></script>
-  <script src="optimizer.js?v=3"></script>
-  <!-- exact ILP solver (pure JS, no build). Falls back to greedy if unavailable. -->
-  <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"
+  <script src="cavalry.js?v=4"></script>
+  <script src="optimizer.js?v=4"></script>
+  <!-- exact ILP solver (pure JS, no build). Falls back to greedy if unavailable. SRI-pinned to the
+       exact 0.4.24 file (a changed CDN copy is refused -> greedy). defer: boot never waits on the
+       CDN — the solver is only read lazily at Optimise time (getSolver). -->
+  <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js" defer
+          integrity="sha384-zDc27WQu4RC/M1+hF5ikSzmZDe0Ix0qAjVMOZi8rI3KKrOqZxvthiRdmjWR5IL3Y" crossorigin="anonymous"
           onerror="window.__solverFailed=true"></script>
   <script>
   (function () {
@@ -316,6 +329,26 @@
     function el(tag, attrs, html) { var e = document.createElement(tag); if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]); if (html != null) e.innerHTML = html; return e; }
     function intSec(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 300; } // sending interval: whole seconds ≥ 1
     function intBudget(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n >= 1) ? n : 1000; } // Movement budget: whole movements ≥ 1
+    function intTroops(v) { var n = Math.floor(Number(v)); return (isFinite(n) && n > 0) ? n : 0; } // troop count: whole ≥ 0
+    function intTs(v) { var n = Math.floor(Number(v)); return isFinite(n) ? Math.min(20, Math.max(0, n)) : 0; } // Tournament Square level: whole 0..20
+    function posArt(v) { var n = Number(v); return (isFinite(n) && n > 0) ? n : 1; } // speed artefact multiplier > 0
+    function isObj(x) { return !!x && typeof x === 'object'; }
+    function normPv(src) { // per-village TS / artefact / Role (+ legacy `inc`): only well-formed values stick
+      var out = {};
+      if (isObj(src)) Object.keys(src).forEach(function (k) {
+        var pv = src[k]; if (!isObj(pv)) return;
+        var o = out[k] = {};
+        if (pv.ts != null) o.ts = intTs(pv.ts);
+        if (pv.artefact != null) o.artefact = posArt(pv.artefact);
+        if (ROLES.indexOf(pv.role) >= 0) o.role = pv.role;
+        if (typeof pv.inc === 'boolean') o.inc = pv.inc;
+      });
+      return out;
+    }
+    // Gameworld host = travian.com or a subdomain (the collector's @match is *://*.travian.com/*).
+    function isGameHost(h) { return /(^|\.)travian\.com$/i.test(h || ''); }
+    // `server` = the gameworld origin (map links point there): an http(s) travian.com origin, else ''.
+    function normServer(s) { if (typeof s !== 'string' || !s) return ''; try { var u = new URL(s); return (/^https?:$/.test(u.protocol) && isGameHost(u.hostname)) ? u.origin : ''; } catch (e) { return ''; } }
     function normStatusFilters(f, statuses) { // diff status toggles: each defaults on; only explicit false sticks
       var src = (f && typeof f === 'object') ? f : {};
       var out = {};
@@ -332,17 +365,25 @@
     // sending interval (seconds) + the Movement budget + diff status toggles (both tabs) +
     // active tab + per-village TS/artefact/Role (persisted; not parsed from the game).
     function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, movementBudget: 1000, diffFilters: { add: true, move: true, keep: true, remove: true }, pvpDiffFilters: { move: true, keep: true }, activeTab: 'data', perVillage: {} } }; }
-    var STATE = { data: blank(), units: null, controls: false, quotaWarned: false };
+    var STATE = { data: blank(), units: null, controls: false, storeFail: false };
+    // every save reports: while storage fails, the #storeWarn banner stays up (all tabs) and
+    // applyData's status says "not saved"; the first save that works clears both. Returns success.
     function persist() {
-      try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); }
-      catch (e) { if (!STATE.quotaWarned) { STATE.quotaWarned = true; status('Could not save locally (storage full/blocked) — data is still in this tab; avoid reloading.', true); } }
+      var ok = true;
+      try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); } catch (e) { ok = false; }
+      STATE.storeFail = !ok; $('storeWarn').classList.toggle('hidden', ok);
+      return ok;
     }
     function restore() {
       try { var s = localStorage.getItem(STORE); if (s) STATE.data = Object.assign(blank(), JSON.parse(s)); } catch (e) { STATE.data = blank(); }
       var d = STATE.data; // normalise a partial/legacy blob so boot can't crash
-      if (!Array.isArray(d.villages)) d.villages = [];
-      if (!Array.isArray(d.oases)) d.oases = [];
-      if (!Array.isArray(d.farmLists)) d.farmLists = [];
+      d.server = normServer(d.server); // a corrupt non-string / non-travian server would break every map link
+      if (typeof d.tribe !== 'string') d.tribe = 'huns';
+      d.mapRadius = Number(d.mapRadius) > 0 ? Number(d.mapRadius) : 200;
+      d.villages = Array.isArray(d.villages) ? d.villages.filter(isObj) : [];
+      d.oases = Array.isArray(d.oases) ? d.oases.filter(isObj) : [];
+      d.farmLists = Array.isArray(d.farmLists) ? d.farmLists.filter(isObj) : [];
+      d.farmLists.forEach(function (l) { if (!Array.isArray(l.targets)) l.targets = []; });
       if (!d.pendingTroops || typeof d.pendingTroops !== 'object') d.pendingTroops = {};
       if (!d.pendingTroops.byDid) d.pendingTroops.byDid = {};
       if (!d.pendingTroops.byName) d.pendingTroops.byName = {};
@@ -355,19 +396,18 @@
       d.config.diffFilters = normFilters(d.config.diffFilters);
       d.config.pvpDiffFilters = normPvpFilters(d.config.pvpDiffFilters);
       if (['data', 'oasis', 'browse', 'pvp', 'plan'].indexOf(d.config.activeTab) < 0) d.config.activeTab = 'data';
-      if (!d.config.perVillage || typeof d.config.perVillage !== 'object') d.config.perVillage = {};
-      Object.keys(d.config.perVillage).forEach(function (k) { // roles: only the three valid values stick
-        var pv = d.config.perVillage[k];
-        if (pv && typeof pv === 'object' && pv.role != null && ROLES.indexOf(pv.role) < 0) delete pv.role;
-      });
+      d.config.perVillage = normPv(d.config.perVillage); // roles: only the three valid values stick
     }
 
     // ── text helpers ──
     var U_MINUS = /−/g, U_MARKS = /[‪-‮⁦-⁩‎‏⁠]/g, U_DASH = /[‐-―−]/g; // bidi marks + dash family (hyphen..em-dash, U+2212)
-    function numC(s) { var m = String(s == null ? '' : s).replace(U_MARKS, '').replace(U_DASH, '-').match(/-?\d[\d.,]*\d|-?\d/); return m ? parseInt(m[0].replace(/[.,]/g, ''), 10) : NaN; }
+    // digit groups: . , and the no-break / narrow no-break spaces (U+00A0, U+202F — e.g. "1 234");
+    // NOT the plain space, so "10 20" stays 10
+    function numC(s) { var m = String(s == null ? '' : s).replace(U_MARKS, '').replace(U_DASH, '-').match(/-?\d[\d.,\u00a0\u202f]*\d|-?\d/); return m ? parseInt(m[0].replace(/[.,\u00a0\u202f]/g, ''), 10) : NaN; }
     function clean(s) { return String(s == null ? '' : s).replace(U_MARKS, '').replace(/\s+/g, ' ').trim(); }
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-    function serverBase() { var s = (STATE.data.server || '').replace(/\/+$/, ''); return /^https?:\/\//i.test(s) ? s : ''; }
+    var SRV = [null, '']; // [raw server, normalised] — memo, mapLink runs per table row
+    function serverBase() { var s = STATE.data.server; if (s !== SRV[0]) SRV = [s, normServer(s)]; return SRV[1]; } // travian.com origin or '' (relative link)
     function mapLink(x, y) { var nx = Number(x), ny = Number(y); if (!isFinite(nx) || !isFinite(ny)) return esc(x + '|' + y); return '<a href="' + esc(serverBase() + '/karte.php?x=' + nx + '&y=' + ny) + '" target="_blank" rel="noopener">' + nx + '|' + ny + '</a>'; }
     function resClass(r) { return 'label-' + esc(r); }
     function typeLabel(b) { return (b || []).map(function (x) { return '<span class="' + resClass(x.res) + '">+' + Number(x.pct) + '% ' + esc(x.res) + '</span>'; }).join(', '); }
@@ -378,13 +418,16 @@
 
     // ── solver ──
     function getSolver() { return (typeof solver !== 'undefined') ? solver : (window.solver || null); }
-    function refreshSolverStatus() {
+    function refreshSolverStatus() { // the solver script is deferred: at boot it is still loading
       $('solverStatus').innerHTML = getSolver()
         ? 'Exact ILP solver loaded (jsLPSolver) — exact when tractable, else greedy.'
-        : '<span class="err">ILP solver not loaded (offline?) — using greedy (near-optimal).</span>';
+        : (!window.__solverFailed && document.readyState !== 'complete')
+          ? '<span class="muted">Loading the exact ILP solver… (Optimise works meanwhile — greedy)</span>'
+          : '<span class="err">ILP solver not loaded (offline?) — using greedy (near-optimal).</span>';
     }
 
-    // ── page parsers (verified vs saved T4.6 DOM) ──
+    // ── page parsers (village / farm-list / troops selectors fixed against the live T4.6 DOM in
+    // 28db002; only the per-entry send comp below is still VALIDATE LIVE) ──
     function parseVillages(doc) {
       var vs = [];
       doc.querySelectorAll('#sidebarBoxVillageList .listEntry.village').forEach(function (eel) {
@@ -497,11 +540,20 @@
         else STATE.data.villages.push(v);
       });
     }
+    // a list with no parsed listId matches by (owning village, name) — did when resolved, else the
+    // village name — so a re-send replaces it instead of appending a copy (doubling its targets).
+    function noIdKeys(l) { var k = []; if (l.villageDid != null) k.push('d' + l.villageDid + '|' + l.name); if (l.villageName) k.push('n' + l.villageName + '|' + l.name); return k; }
     function upsertFarmLists(fl) {
-      var idx = {}; STATE.data.farmLists.forEach(function (l, i) { if (l.listId != null) idx[l.listId] = i; });
+      var idx = {}, noId = {};
+      STATE.data.farmLists.forEach(function (l, i) {
+        if (l.listId != null) idx[l.listId] = i;
+        else noIdKeys(l).forEach(function (k) { (noId[k] = noId[k] || []).push(i); });
+      });
+      var used = {}; // each stored no-id list is matched at most once per send (same-named lists stay distinct)
       fl.forEach(function (l) {
         var i = (l.listId != null) ? idx[l.listId] : null;
-        if (i != null) { var ex = STATE.data.farmLists[i]; ex.name = l.name; if (l.villageName) ex.villageName = l.villageName;
+        if (l.listId == null) noIdKeys(l).some(function (k) { var c = (noId[k] || []).filter(function (j) { return !used[j]; }); if (c.length) { i = c[0]; used[i] = 1; } return i != null; });
+        if (i != null) { var ex = STATE.data.farmLists[i]; ex.name = l.name; if (l.villageName) ex.villageName = l.villageName; if (l.villageDid != null) ex.villageDid = l.villageDid;
           if (l.targets.length || !ex.targets.length) ex.targets = l.targets; } // don't clobber captured targets with a collapsed re-parse
         else STATE.data.farmLists.push(l);
       });
@@ -520,67 +572,101 @@
         if (t) v.troops = Object.assign({}, t); // authoritative: replace (so a 0 in the troops page drops the slot)
       });
     }
-    function resolveFarmListVillages() { // map each list's owning villageName -> did (null if name ambiguous)
+    function resolveFarmListVillages(lists) { // map each list's owning villageName -> did (null if name ambiguous)
       var byName = {}; STATE.data.villages.forEach(function (v) { byName[v.name] = (v.name in byName) ? null : v.did; });
-      STATE.data.farmLists.forEach(function (l) { if (l.villageName && byName[l.villageName]) l.villageDid = byName[l.villageName]; });
+      (lists || STATE.data.farmLists).forEach(function (l) { if (l.villageName && byName[l.villageName]) l.villageDid = byName[l.villageName]; });
     }
+    // (villages are only ever upserted, never pruned: a page without the sidebar — or a partial
+    // one — would otherwise delete villages with their typed troops; Clear is the reset.)
     function mergePage(html) {
       var doc; try { doc = new DOMParser().parseFromString(html, 'text/html'); } catch (e) { status('Could not parse page HTML.', true); return; }
       var found = [];
       var vs = parseVillages(doc); if (vs.length) { upsertVillages(vs); found.push(vs.length + ' villages'); }
-      var fl = parseFarmLists(doc); if (fl.length) { upsertFarmLists(fl); found.push(fl.length + ' farm lists/' + fl.reduce(function (s, l) { return s + l.targets.length; }, 0) + ' targets'); }
+      var fl = parseFarmLists(doc); if (fl.length) { resolveFarmListVillages(fl); upsertFarmLists(fl); found.push(fl.length + ' farm lists/' + fl.reduce(function (s, l) { return s + l.targets.length; }, 0) + ' targets'); }
       var got = mergePending(parseTroops(doc)); if (got) found.push('troops for ' + got + ' villages');
       var tribe = detectTribe(doc); if (tribe) STATE.data.tribe = tribe;
       applyTroops(); resolveFarmListVillages();
+      if (found.length) resetResults(); // results described the data before this page
       applyData(found.length ? ('Page received: ' + found.join(', ') + '.') : 'Page received, but no villages / farm-lists / troops recognised (right page? farm lists expanded?).', !found.length);
+    }
+    function normOases(arr) {
+      return arr.filter(function (o) { return isObj(o) && isFinite(Number(o.x)) && isFinite(Number(o.y)); })
+        .map(function (o) { return { x: Number(o.x), y: Number(o.y), bonuses: Array.isArray(o.bonuses) ? o.bonuses.filter(function (b) { return isObj(b) && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct)); }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; }) : [] }; });
     }
     // oases-only merge: replaces the oasis set, KEEPS villages / farm-lists / troops / config / skips.
     // Used by both the collector 'oases' postMessage AND an imported oases-only file (see ingestJson).
     function mergeOases(p) {
-      if (!Array.isArray(p.oases)) return;
-      STATE.data.oases = p.oases.filter(function (o) { return o && isFinite(Number(o.x)) && isFinite(Number(o.y)); })
-        .map(function (o) { return { x: Number(o.x), y: Number(o.y), bonuses: Array.isArray(o.bonuses) ? o.bonuses.filter(function (b) { return b && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct)); }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; }) : [] }; });
-      if (p.server) STATE.data.server = p.server;
-      if (p.mapRadius) STATE.data.mapRadius = Number(p.mapRadius) || STATE.data.mapRadius;
+      if (!Array.isArray(p.oases)) { status('Invalid oases data: need {oases:[…]}.', true); return; }
+      var prev = STATE.data.oases.length;
+      STATE.data.oases = normOases(p.oases);
+      var sv = normServer(p.server); if (sv) STATE.data.server = sv; // non-travian / non-string: keep the previous one
+      var mr = Number(p.mapRadius); if (mr > 0) STATE.data.mapRadius = mr;
       if (p.scannedAt) STATE.data.scannedAt = String(p.scannedAt);
-      applyData('Oases received: ' + STATE.data.oases.length + (STATE.data.scannedAt ? ' (as of ' + STATE.data.scannedAt.slice(0, 10) + ')' : '') + '.');
+      resetResults();
+      // the whole set is replaced, so a partial scan (older collectors could save one) silently
+      // drops oases — still applied, but a >10% shrink is called out
+      var fewer = prev - STATE.data.oases.length, drop = prev && fewer > prev * 0.1;
+      applyData('Oases received: ' + STATE.data.oases.length + (STATE.data.scannedAt ? ' (as of ' + STATE.data.scannedAt.slice(0, 10) + ')' : '') + '.'
+        + (drop ? ' ⚠ ' + fewer + ' fewer free oases than the previous scan (' + prev + ') — if the scan was incomplete, rescan.' : ''), drop);
     }
-    // full data object (JSON import / sample)
+    // full data object (JSON import / sample / Export file). Built into a local copy and swapped in
+    // only when complete — a malformed entry can never leave half-loaded state for the next save.
     function loadData(obj) {
-      if (!obj || !Array.isArray(obj.villages) || !Array.isArray(obj.oases)) { status('Invalid data: need {villages:[], oases:[], …}.', true); return; }
-      STATE.data = blank();
-      STATE.data.server = obj.server || ''; STATE.data.tribe = String(obj.tribe || 'huns').toLowerCase(); STATE.data.mapRadius = Number(obj.mapRadius) || 200;
-      STATE.data.scannedAt = (typeof obj.scannedAt === 'string') ? obj.scannedAt : ''; // keep the scan freshness
-      if (Array.isArray(obj.skipped)) STATE.data.skipped = obj.skipped.filter(function (k) { return typeof k === 'string'; }); // round-trip skips
-      if (obj.config && typeof obj.config === 'object') { // round-trip the global interval + diff toggles + per-village TS/artefact/Role
-        STATE.data.config.intervalSec = intSec(obj.config.intervalSec);
-        STATE.data.config.movementBudget = intBudget(obj.config.movementBudget);
-        STATE.data.config.diffFilters = normFilters(obj.config.diffFilters);
-        STATE.data.config.pvpDiffFilters = normPvpFilters(obj.config.pvpDiffFilters);
-        if (obj.config.perVillage && typeof obj.config.perVillage === 'object') STATE.data.config.perVillage = obj.config.perVillage;
-      }
-      obj.villages.forEach(function (v) {
-        if (!v || !isFinite(Number(v.did)) || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) return;
-        var troops = {}; if (v.troops) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = Number(v.troops[k]) || 0; });
-        STATE.data.villages.push({ did: Number(v.did), name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
-      });
-      STATE.data.oases = obj.oases.filter(function (o) { return o && isFinite(Number(o.x)) && isFinite(Number(o.y)); })
-        .map(function (o) { return { x: Number(o.x), y: Number(o.y), bonuses: Array.isArray(o.bonuses) ? o.bonuses.filter(function (b) { return b && PVE.RES.indexOf(b.res) !== -1 && isFinite(Number(b.pct)); }).map(function (b) { return { res: b.res, pct: Number(b.pct) }; }) : [] }; });
-      STATE.data.farmLists = (Array.isArray(obj.farmLists) ? obj.farmLists : []).map(function (l) {
-        return { listId: l.listId != null ? Number(l.listId) : null, name: String(l.name == null ? '' : l.name), villageName: l.villageName || '',
-                 villageDid: (l.villageDid != null && isFinite(Number(l.villageDid))) ? Number(l.villageDid) : null,
-                 targets: Array.isArray(l.targets) ? l.targets.filter(function (t) { return t && isFinite(Number(t.x)) && isFinite(Number(t.y)); }).map(function (t) {
-                   var out = { x: Number(t.x), y: Number(t.y) };
-                   if (t.comp && typeof t.comp === 'object') { // per-entry send comp (PvP farms); t1..t10 only — no hero slot
-                     var c = {};
-                     Object.keys(t.comp).forEach(function (k) { if (/^t([1-9]|10)$/.test(k) && Number(t.comp[k]) > 0) c[k] = Number(t.comp[k]); });
-                     if (Object.keys(c).length) out.comp = c;
-                   }
-                   if (t.hero) out.hero = true;
-                   return out;
-                 }) : [] };
-      });
-      applyData('Imported ' + STATE.data.villages.length + ' villages, ' + STATE.data.oases.length + ' oases, ' + STATE.data.farmLists.length + ' farm lists.');
+      if (!isObj(obj) || !Array.isArray(obj.villages) || !Array.isArray(obj.oases)) { status('Invalid data: need {villages:[], oases:[], …}.', true); return; }
+      var nd = blank();
+      try {
+        nd.server = normServer(obj.server); nd.tribe = String(obj.tribe || 'huns').toLowerCase(); nd.mapRadius = Number(obj.mapRadius) > 0 ? Number(obj.mapRadius) : 200;
+        nd.scannedAt = (typeof obj.scannedAt === 'string') ? obj.scannedAt : ''; // keep the scan freshness
+        if (Array.isArray(obj.skipped)) nd.skipped = obj.skipped.filter(function (k) { return typeof k === 'string'; }); // round-trip skips
+        if (isObj(obj.config)) { // round-trip the global interval + diff toggles + per-village TS/artefact/Role
+          nd.config.intervalSec = intSec(obj.config.intervalSec);
+          nd.config.movementBudget = intBudget(obj.config.movementBudget);
+          nd.config.diffFilters = normFilters(obj.config.diffFilters);
+          nd.config.pvpDiffFilters = normPvpFilters(obj.config.pvpDiffFilters);
+          nd.config.perVillage = normPv(obj.config.perVillage);
+        }
+        obj.villages.forEach(function (v) {
+          if (!isObj(v) || !isFinite(Number(v.did)) || !isFinite(Number(v.x)) || !isFinite(Number(v.y))) return;
+          var troops = {}; if (isObj(v.troops)) Object.keys(v.troops).forEach(function (k) { if (/^t\d+$/.test(k)) troops[k] = intTroops(v.troops[k]); });
+          nd.villages.push({ did: Number(v.did), name: String(v.name == null ? v.did : v.name), x: Number(v.x), y: Number(v.y), troops: troops });
+        });
+        nd.oases = normOases(obj.oases);
+        nd.farmLists = (Array.isArray(obj.farmLists) ? obj.farmLists : []).filter(isObj).map(function (l) {
+          return { listId: (l.listId != null && isFinite(Number(l.listId))) ? Number(l.listId) : null, name: String(l.name == null ? '' : l.name), villageName: l.villageName ? String(l.villageName) : '',
+                   villageDid: (l.villageDid != null && isFinite(Number(l.villageDid))) ? Number(l.villageDid) : null,
+                   targets: Array.isArray(l.targets) ? l.targets.filter(function (t) { return isObj(t) && isFinite(Number(t.x)) && isFinite(Number(t.y)); }).map(function (t) {
+                     var out = { x: Number(t.x), y: Number(t.y) };
+                     if (isObj(t.comp)) { // per-entry send comp (PvP farms); t1..t10 only — no hero slot
+                       var c = {};
+                       Object.keys(t.comp).forEach(function (k) { if (/^t([1-9]|10)$/.test(k) && Number(t.comp[k]) > 0) c[k] = Number(t.comp[k]); });
+                       if (Object.keys(c).length) out.comp = c;
+                     }
+                     if (t.hero) out.hero = true;
+                     return out;
+                   }) : [] };
+        });
+      } catch (e) { status('Could not import: ' + ((e && e.message) || e) + ' — your current data is unchanged.', true); return; }
+      if ((STATE.data.villages.length || STATE.data.oases.length)
+          && !confirm('Replace ALL current data (' + statusLine() + ') with this dataset? Tip: Export data (.json) first to keep a copy.')) { status('Import cancelled — your current data is unchanged.'); return; }
+      STATE.data = nd; resetResults();
+      applyData('Imported ' + nd.villages.length + ' villages, ' + nd.oases.length + ' oases, ' + nd.farmLists.length + ' farm lists.');
+    }
+    // Export: the full dataset in exactly the shape loadData reads back (lossless round trip).
+    // Intentionally NOT exported: pendingTroops (troops-page rows are already applied onto
+    // villages[].troops; rows for villages not yet seen are dropped — re-send the troops page) and
+    // config.activeTab (UI state).
+    function exportData() {
+      var d = STATE.data, c = d.config;
+      if (!d.villages.length && !d.oases.length) { status('Nothing to export yet.', true); return; }
+      var out = { server: d.server, tribe: d.tribe, mapRadius: d.mapRadius, scannedAt: d.scannedAt, villages: d.villages, oases: d.oases, farmLists: d.farmLists, skipped: d.skipped,
+                  config: { intervalSec: c.intervalSec, movementBudget: c.movementBudget, diffFilters: c.diffFilters, pvpDiffFilters: c.pvpDiffFilters, perVillage: c.perVillage } };
+      var now = new Date(), p2 = function (n) { return ('0' + n).slice(-2); };
+      var host = (serverBase() ? new URL(serverBase()).hostname : 'data').replace(/[^a-z0-9.\-]/gi, '');
+      var name = 'farm-optimizer-' + host + '-' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) + '.json';
+      var url = URL.createObjectURL(new Blob([JSON.stringify(out)], { type: 'application/json' }));
+      var a = el('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+      status('Exported ' + name + ' — ' + statusLine() + '.');
     }
 
     // ── apply state to the UI ──
@@ -602,6 +688,7 @@
       $('mpBudget').value = STATE.data.config.movementBudget;
       $('tribeSel').value = tribe;
       $('dataStatus').innerHTML = (isErr ? '<span class="err">' : '<span class="ok">') + esc(msg || 'Loaded.') + '</span> <span class="muted">— ' + esc(statusLine()) + '</span>'
+        + (STATE.storeFail ? ' <span class="err">· NOT saved locally (storage full/blocked) — export before reloading.</span>' : '')
         + (!isErr && STATE.data.villages.length ? ' <span class="muted">· next: set Roles below, then Optimise on the Oasis Optimizer tab.</span>' : '');
       if (STATE.data.villages.length) {
         if (!STATE.controls) { renderCav(); renderMpCav(); STATE.controls = true; }
@@ -629,7 +716,14 @@
       var sel = $('tribeSel'); sel.innerHTML = '';
       TRIBES.forEach(function (t) { var o = document.createElement('option'); o.value = t.id; o.textContent = t.name; sel.appendChild(o); });
     }
-    function onTribeChange() { var sel = $('tribeSel'); STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; renderCav(); renderMpCav(); STATE.renderedTribe = sel.value; STATE.controls = true; renderVillages(); persist(); }
+    function onTribeChange() { var sel = $('tribeSel'); STATE.data.tribe = sel.value; STATE.units = UNITS[sel.value]; resetResults(); renderCav(); renderMpCav(); STATE.renderedTribe = sel.value; STATE.controls = true; renderVillages(); persist(); }
+    // drop every oasis / PvP / planner result: after a data change they describe data that no
+    // longer exists (and a stale lastPvp would skew the combined 20,000-cap warning)
+    function resetResults() {
+      STATE.lastRun = null; STATE.lastPvp = null;
+      ['secRes', 'secPlanRes'].forEach(function (s) { $(s).classList.add('hidden'); });
+      ['cards', 'diffFilters', 'diffTable', 'pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable', 'pvpStatus', 'mpCards', 'mpTroops', 'mpTable'].forEach(function (s) { $(s).innerHTML = ''; });
+    }
     function renderCavRow(rowEl, preset, onToggle) {
       rowEl.innerHTML = '';
       cav(STATE.data.tribe).forEach(function (u) {
@@ -693,7 +787,7 @@
       STATE.data.oases.forEach(function (o) { free[o.x + '|' + o.y] = true; });
       var s = pvCfg(v.did);
       var ts = s.ts != null ? s.ts : 0, art = s.artefact != null ? s.artefact : 1;
-      var intervalMin = intSec($('gIntSec').value) / 60;
+      var intervalMin = STATE.data.config.intervalSec / 60;
       var radius = STATE.data.mapRadius || 200, sum = 0;
       (STATE.data.farmLists || []).forEach(function (l) {
         if (l.villageDid == null || l.villageDid != v.did) return; // unresolved lists aren't attributable
@@ -755,6 +849,9 @@
     function renderVillages() {
       var sel = selectedSlots(), list = STATE.units || [], tbl = $('vilTable');
       var kinds = STATE.data.oases.length ? PVE.farmKinds(STATE.data) : {};
+      // a re-render (e.g. a Role change) replaces every control — note the focused one to restore it
+      var fa = document.activeElement, ftr = fa && tbl.contains(fa) && fa.closest('tr[data-did]');
+      var fk = ftr ? { did: ftr.getAttribute('data-did'), sel: '.' + fa.classList[0] + (fa.getAttribute('data-slot') ? '[data-slot="' + fa.getAttribute('data-slot') + '"]' : '') } : null;
       var head = '<tr><th title="pve = farms oases · pvp = holds PvP farms · off = neither">Role</th><th>Village</th><th>Coords</th>';
       list.forEach(function (u) { head += '<th>' + esc(u.name.split(' ')[0]) + '</th>'; });
       head += '<th class="num" title="The village\'s rainbow capacity — min over the selected cavalry types\' counts">Budget</th><th class="num" title="Rainbows the current farm lists tie up (free-oasis targets only)">Now</th>'
@@ -764,25 +861,30 @@
         var s = pvCfg(v.did);
         var role = roleOf(v.did);
         var conflict = roleConflict(v, kinds);
+        var vn = esc(v.name || v.did); // accessible names: "A001 Marksman count", "A001 Role", …
         body += '<tr data-did="' + esc(v.did) + '">';
-        body += '<td><select class="vrole">' + ROLES.map(function (r) {
+        body += '<td><select class="vrole" aria-label="' + vn + ' Role">' + ROLES.map(function (r) {
           return '<option value="' + r + '"' + (role === r ? ' selected' : '') + '>' + r + '</option>';
-        }).join('') + '</select>' + (conflict ? '<span class="warnchip" title="' + esc(conflict) + '">⚠</span>' : '') + '</td>';
-        body += '<td>' + esc(v.name || v.did) + '</td><td>' + mapLink(v.x, v.y) + '</td>';
+        }).join('') + '</select>' + (conflict ? '<span class="warnchip" tabindex="0" role="img" aria-label="Role conflict: ' + esc(conflict) + '" data-tip="' + esc(conflict) + '">⚠</span>' : '') + '</td>';
+        body += '<td>' + vn + '</td><td>' + mapLink(v.x, v.y) + '</td>';
         list.forEach(function (u) {
           var c = (v.troops && v.troops[u.slot]) || 0;
           var on = sel.indexOf(u.slot) >= 0;
-          body += '<td><input type="number" class="vtr' + (on ? '' : ' dim') + '" data-slot="' + u.slot + '" value="' + esc(c) + '" min="0"></td>';
+          body += '<td><input type="number" class="vtr' + (on ? '' : ' dim') + '" data-slot="' + u.slot + '" value="' + esc(c) + '" min="0" step="1" aria-label="' + vn + ' ' + esc(u.name) + ' count"></td>';
         });
         var now = currentUsage(v), plan = planUsage(v);
         body += '<td class="vbud num"><b>' + budgetOf(v, sel) + '</b></td>';
         body += '<td class="vnow num">' + (now == null ? '—' : now) + '</td>';
         body += '<td class="vplan num">' + (plan == null ? '—' : plan.used + '/' + plan.budget) + '</td>';
-        body += '<td><input type="number" class="vts" value="' + esc(s.ts != null ? s.ts : 0) + '" min="0" max="20"></td>';
-        body += '<td><input type="number" class="vart" value="' + esc(s.artefact != null ? s.artefact : 1) + '" min="0.1" step="0.1"></td>';
+        body += '<td><input type="number" class="vts" value="' + esc(s.ts != null ? s.ts : 0) + '" min="0" max="20" step="1" aria-label="' + vn + ' Tournament Square level"></td>';
+        body += '<td><input type="number" class="vart" value="' + esc(s.artefact != null ? s.artefact : 1) + '" min="0.1" step="0.1" aria-label="' + vn + ' speed artefact multiplier"></td>';
         body += '</tr>';
       });
       tbl.innerHTML = head + body;
+      if (fk) Array.prototype.some.call(tbl.querySelectorAll('tr[data-did]'), function (tr) {
+        if (tr.getAttribute('data-did') !== fk.did) return false;
+        var e = tr.querySelector(fk.sel); if (e) e.focus(); return true;
+      });
     }
     // refresh one row's "Now" cell (current usage depends on interval/TS/artefact/selection, not troop counts)
     function refreshNow(tr) {
@@ -793,50 +895,63 @@
     }
     function refreshAllNow() { Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), refreshNow); }
     // edits to troop counts / TS / artefact / include + the global interval -> update state & persist.
+    // `input` stores the normalised value while typing; `change` (commit: blur / Enter / spinner)
+    // writes the effective value back, so the field never shows a number the solve doesn't use.
     document.addEventListener('input', function (ev) {
       var t = ev.target; if (!t || !t.classList) return;
-      if (t.id === 'gIntSec') { STATE.data.config.intervalSec = intSec(t.value); persist(); refreshAllNow(); return; }
+      if (t.id === 'gIntSec') { var ni = Math.floor(Number(t.value)); if (t.value !== '' && isFinite(ni) && ni >= 1) { STATE.data.config.intervalSec = ni; persist(); refreshAllNow(); } return; } // invalid: keep the last valid
       if (t.id === 'mpBudget') { var nb = Math.floor(Number(t.value)); if (isFinite(nb) && nb >= 1) { STATE.data.config.movementBudget = nb; persist(); } return; }
       var tr = t.closest && t.closest('tr[data-did]'); if (!tr) return;
       var did = tr.getAttribute('data-did');
       if (t.classList.contains('vtr')) {
         var v = villageByDid(did); if (!v) return;
-        v.troops = v.troops || {}; v.troops[t.getAttribute('data-slot')] = Number(t.value) || 0;
+        v.troops = v.troops || {}; v.troops[t.getAttribute('data-slot')] = intTroops(t.value);
         var bud = tr.querySelector('.vbud'); if (bud) bud.innerHTML = '<b>' + budgetOf(v, selectedSlots()) + '</b>';
         persist();
-      } else if (t.classList.contains('vts')) { var n = Number(t.value); ensurePv(did).ts = (isFinite(n) && n >= 0) ? n : 0; persist(); refreshNow(tr); }
-      else if (t.classList.contains('vart')) { var a = Number(t.value); ensurePv(did).artefact = (isFinite(a) && a > 0) ? a : 1; persist(); refreshNow(tr); }
+      } else if (t.classList.contains('vts')) { ensurePv(did).ts = intTs(t.value); persist(); refreshNow(tr); }
+      else if (t.classList.contains('vart')) { ensurePv(did).artefact = posArt(t.value); persist(); refreshNow(tr); }
     });
     document.addEventListener('change', function (ev) {
-      var t = ev.target; if (!t || !t.classList || !t.classList.contains('vrole')) return;
-      var tr = t.closest('tr[data-did]'); if (!tr) return;
-      ensurePv(tr.getAttribute('data-did')).role = ROLES.indexOf(t.value) >= 0 ? t.value : 'off';
-      persist(); renderVillages(); // re-render so conflict chips track the new role
+      var t = ev.target; if (!t || !t.classList) return;
+      if (t.id === 'gIntSec') {
+        var eff = String(STATE.data.config.intervalSec);
+        if (t.value !== eff) { status('Sending interval must be a whole number of seconds ≥ 1 — using ' + eff + ' s.', true); t.value = eff; }
+        return;
+      }
+      var tr = t.closest && t.closest('tr[data-did]'); if (!tr) return;
+      var did = tr.getAttribute('data-did'), pv = pvCfg(did), v = villageByDid(did), fixed = null;
+      if (t.classList.contains('vtr')) fixed = (v && v.troops && v.troops[t.getAttribute('data-slot')]) || 0;
+      else if (t.classList.contains('vts')) fixed = pv.ts != null ? pv.ts : 0;
+      else if (t.classList.contains('vart')) fixed = pv.artefact != null ? pv.artefact : 1;
+      if (fixed != null) { if (t.value !== String(fixed)) t.value = fixed; return; } // clamped value back into the field
+      if (!t.classList.contains('vrole')) return;
+      ensurePv(did).role = ROLES.indexOf(t.value) >= 0 ? t.value : 'off';
+      persist(); renderVillages(); // re-render so conflict chips track the new role (focus is restored)
     });
+    $('vilTable').addEventListener('click', function (ev) { if (ev.target.classList && ev.target.classList.contains('warnchip')) ev.target.focus(); }); // tap shows the detail
 
     function applyAll() {
-      var ts = Number($('gTs').value), ar = Number($('gArt').value);
+      var ts = intTs($('gTs').value), ar = posArt($('gArt').value);
+      $('gTs').value = ts; $('gArt').value = ar; // show what was applied
       STATE.data.villages.forEach(function (v) {
         var pv = ensurePv(String(v.did));
-        pv.ts = (isFinite(ts) && ts >= 0) ? ts : 0;
-        pv.artefact = (isFinite(ar) && ar > 0) ? ar : 1;
+        pv.ts = ts; pv.artefact = ar;
       });
       persist(); renderVillages();
     }
     function gatherCfg() {
-      var intervalMin = intSec($('gIntSec').value) / 60; // optimizer cost model is in minutes; the UI is in seconds
+      var intervalMin = STATE.data.config.intervalSec / 60; // optimizer cost model is in minutes; the UI is in seconds
       var perVillage = {}, included = [];
       Array.prototype.forEach.call($('vilTable').querySelectorAll('tr[data-did]'), function (tr) {
         var did = Number(tr.getAttribute('data-did'));
         if (tr.querySelector('.vrole').value === 'pve') included.push(did); // only Role-pve villages farm oases
-        var ts = Number(tr.querySelector('.vts').value), ar = Number(tr.querySelector('.vart').value);
-        perVillage[did] = { ts: (isFinite(ts) && ts >= 0) ? ts : 0, interval: intervalMin, artefact: (isFinite(ar) && ar > 0) ? ar : 1 };
+        perVillage[did] = { ts: intTs(tr.querySelector('.vts').value), interval: intervalMin, artefact: posArt(tr.querySelector('.vart').value) };
       });
       return { units: STATE.units, selectedSlots: selectedSlots(), includedDids: included, resourceFilter: resourceFilter(), perVillage: perVillage, skipped: STATE.data.skipped };
     }
     // PvP side: per-type stocks come from the villages themselves; only Role-pvp villages take part.
     function gatherPvpCfg() {
-      var intervalMin = intSec($('gIntSec').value) / 60;
+      var intervalMin = STATE.data.config.intervalSec / 60;
       var perVillage = {}, pvpDids = [];
       STATE.data.villages.forEach(function (v) {
         var pv = pvCfg(v.did);
@@ -920,7 +1035,10 @@
     }
     // grouping key: current holder for keep/move/remove; destination for an add (no current holder).
     // Keyed on the village DID (not name — Travian allows duplicate names that would otherwise merge).
-    function groupKeyFor(r) { return (r.status === 'add' || r.status === 'keep') ? r.toDid : (r.fromDid != null ? r.fromDid : r.toDid); }
+    // A move/remove from a list whose owner never resolved has fromDid null -> the "unknown village"
+    // group (not the destination's: the row would read as that village moving to itself).
+    function groupKeyFor(r) { return (r.status === 'add' || r.status === 'keep') ? r.toDid : r.fromDid; }
+    var UNKNOWN_VIL = 'Unknown village (farm-list owner not resolved — re-send the farm-list page with the village sidebar visible)';
     function isSkipped(k) { return (STATE.data.skipped || []).indexOf(k) >= 0; }
     // distance (fields) from the oasis to the village whose group this row sits under
     function rowDist(r) {
@@ -978,7 +1096,7 @@
       names.sort(function (a, b) { var oa = ord[a] == null ? 1e9 : ord[a], ob = ord[b] == null ? 1e9 : ord[b]; return (oa - ob) || String(a).localeCompare(String(b)); });
       var html = '';
       names.forEach(function (g) {
-        var label = nameByDid[g]; if (label == null) label = '—';
+        var label = nameByDid[g]; if (label == null) label = UNKNOWN_VIL;
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
         html += vgroupTag(wasOpen, g, esc(label) + ' <span class="muted">(' + list.length + ')</span>')
           + '<table><tr><th>Action</th><th>Oasis</th><th class="num">Dist</th><th>Type</th><th>Detail</th><th></th></tr>'
@@ -1101,7 +1219,7 @@
       var wasOpen = openStates($('pvpTable'));
       dids.forEach(function (g) {
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
-        html += vgroupTag(wasOpen, g, esc(nameByDid[g] != null ? nameByDid[g] : g) + ' <span class="muted">(' + list.length + ')</span>')
+        html += vgroupTag(wasOpen, g, esc(nameByDid[g] != null ? nameByDid[g] : UNKNOWN_VIL) + ' <span class="muted">(' + list.length + ')</span>')
           + '<table><tr><th>Action</th><th>Target</th><th>List</th><th>Send</th><th class="num">Waves</th><th class="num">Travel</th><th>Detail</th></tr>'
           + list.map(function (r) {
             var travel = r.status === 'move'
@@ -1123,7 +1241,7 @@
     // pool — solvePool enforces the pooled ceiling). The cavalry / resource selections are the
     // planner's own copies. Display only — no plan diff; lists shown per oasis as info.
     function gatherPlanCfg(budget) {
-      var intervalMin = intSec($('gIntSec').value) / 60;
+      var intervalMin = STATE.data.config.intervalSec / 60;
       var perVillage = {}, included = [];
       STATE.data.villages.forEach(function (v) {
         var pv = pvCfg(v.did);
@@ -1243,19 +1361,43 @@
       if (obj && (obj.pve === 'oases' || (Array.isArray(obj.oases) && !Array.isArray(obj.villages)))) { mergeOases(obj); return; }
       loadData(obj);
     }
+    // one ingest, atomically: an exception anywhere (parse, merge, render) restores the previous
+    // dataset and surfaces as a status error — never an uncaught throw or half-merged state.
+    function guarded(fn) {
+      var snap = JSON.stringify(STATE.data);
+      try { fn(); } catch (e) {
+        STATE.data = JSON.parse(snap); resetResults(); persist();
+        try { applyData(); } catch (e2) { /* keep the error below visible */ }
+        status('Could not read that data (' + ((e && e.message) || e) + ') — your previous data is unchanged.', true);
+      }
+    }
     function ingestText(text) {
       var s = (text || '').trim();
       if (!s) return;
-      if (s[0] === '{' || s[0] === '[') { try { var obj = JSON.parse(s); ingestJson(obj); return; } catch (e) { /* not json, try html */ } }
-      mergePage(s); // treat as a page's HTML
+      if (s[0] === '{' || s[0] === '[') {
+        var obj, bad = null; try { obj = JSON.parse(s); } catch (e) { bad = e; }
+        if (!bad) { guarded(function () { ingestJson(obj); }); return; }
+        if (s.indexOf('<') < 0) { status('Not valid JSON (' + bad.message + ') — nothing was imported.', true); return; } // else: HTML that starts oddly
+      }
+      guarded(function () { mergePage(s); }); // treat as a page's HTML
     }
 
     // ── wire up ──
     $('btnFile').addEventListener('click', function () { $('fileInput').click(); });
-    $('fileInput').addEventListener('change', function (e) { var f = e.target.files[0]; if (!f) return; var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.readAsText(f); });
+    $('fileInput').addEventListener('change', function (e) {
+      var f = e.target.files[0]; e.target.value = ''; if (!f) return; // reset, so picking the same file again still fires change
+      var rd = new FileReader(); rd.onload = function () { ingestText(rd.result); }; rd.onerror = function () { status('Could not read ' + f.name + '.', true); }; rd.readAsText(f);
+    });
     $('btnPaste').addEventListener('click', function () { ingestText($('pasteBox').value); });
-    $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(loadData).catch(function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
-    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); STATE.controls = false; STATE.lastRun = null; STATE.lastPvp = null; try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secRes', 'secBrowse', 'secPvp', 'secPlan', 'secPlanRes'].forEach(function (s) { $(s).classList.add('hidden'); }); ['hintOasis', 'hintBrowse', 'hintPvp', 'hintPlan'].forEach(function (s) { $(s).classList.remove('hidden'); }); $('cavRow').innerHTML = ''; $('mpCavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('mpBudget').value = 1000; ['pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable', 'mpCards', 'mpTroops', 'mpTable'].forEach(function (s) { $(s).innerHTML = ''; }); $('pvpStatus').innerHTML = ''; renderTribeSel(); setTab('data'); status('Cleared.'); });
+    $('btnSample').addEventListener('click', function () { fetch('sample-data.json').then(function (r) { return r.json(); }).then(function (obj) { guarded(function () { loadData(obj); }); }, function () { status('Could not fetch sample-data.json (use a local server or Import file).', true); }); });
+    $('btnExport').addEventListener('click', exportData);
+    $('btnForget').addEventListener('click', function () {
+      var n = STATE.data.farmLists.length; if (!n) { status('No farm lists stored.'); return; }
+      if (!confirm('Forget all ' + n + ' stored farm lists? Villages, oases, troops, settings and skips stay — re-send the farm-list pages afterwards.')) return;
+      STATE.data.farmLists = []; resetResults();
+      applyData('Forgot ' + n + ' farm lists — re-send the farm-list pages (expanded) to capture the current ones.');
+    });
+    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); STATE.controls = false; resetResults(); try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secBrowse', 'secPvp', 'secPlan'].forEach(function (s) { $(s).classList.add('hidden'); }); ['hintOasis', 'hintBrowse', 'hintPvp', 'hintPlan'].forEach(function (s) { $(s).classList.remove('hidden'); }); $('cavRow').innerHTML = ''; $('mpCavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('mpBudget').value = 1000; renderTribeSel(); setTab('data'); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
     $('btnPvp').addEventListener('click', runPvp);
@@ -1265,17 +1407,22 @@
     $('brMax').addEventListener('input', renderBrowse);
 
     // ── collector hand-off (postMessage) ──
-    function isGameOrigin(o) { try { return /(^|\.)travian\.[a-z.]+$/i.test(new URL(o).hostname); } catch (e) { return false; } } // suffix, not prefix
+    // only an https gameworld (travian.com / *.travian.com — the collector's @match) may post data;
+    // exact host suffix, so travian.evil.com / www.travian.com.evil.net are refused
+    function isGameOrigin(o) { try { var u = new URL(o); return u.protocol === 'https:' && isGameHost(u.hostname); } catch (e) { return false; } }
     var seenMsg = {};
     window.addEventListener('message', function (ev) {
-      if (!isGameOrigin(ev.origin) && ev.origin !== location.origin) return; // collector (travian) or same-origin (tests)
+      var self = ev.origin === location.origin && ev.origin !== 'null'; // same-origin (smoke test); never an opaque origin
+      if (!self && !isGameOrigin(ev.origin)) return;
       var d = ev.data; if (!d || typeof d !== 'object') return;
       function ack() { try { if (ev.source && d.id != null) ev.source.postMessage('pve-got:' + d.id, ev.origin); } catch (e) {} }
       if (d.id != null && seenMsg[d.id]) { ack(); return; } // dedupe re-posts (collector retries until ack'd)
-      if (d.pve === 'oases') mergeOases(d);
-      else if (d.pve === 'page' && typeof d.html === 'string') mergePage(d.html);
-      else if (Array.isArray(d.villages) && Array.isArray(d.oases)) loadData(d); // legacy full payload
+      var run;
+      if (d.pve === 'oases') run = function () { mergeOases(d); };
+      else if (d.pve === 'page' && typeof d.html === 'string') run = function () { mergePage(d.html); };
+      else if (self && Array.isArray(d.villages) && Array.isArray(d.oases)) run = function () { loadData(d); }; // legacy full payload: same-origin only, never from a game origin
       else return;
+      guarded(run);
       if (d.id != null) seenMsg[d.id] = 1;
       ack();
     });

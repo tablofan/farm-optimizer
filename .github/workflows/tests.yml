@@ -8,18 +8,49 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  unit:
+    name: Unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Syntax-check the scripts
+        run: for f in cavalry.js optimizer.js collector.user.js test.js; do node --check "$f"; done
+
+      # The page loads this exact version from the CDN; installing it lets the real-solver test run
+      # instead of being skipped.
+      - name: Install the ILP solver
+        run: npm install --no-save --no-package-lock javascript-lp-solver@0.4.24
+
+      - name: Run unit tests
+        run: node test.js
+
+  smoke:
+    name: Browser smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
 
-      - name: Run unit tests
-        run: node test.js
+      # smoke.sh serves the repo and runs smoke-test.html in headless Chrome (preinstalled on
+      # ubuntu-latest). It fails unless the page finished (SMOKE-DONE) with no SMOKE-FAIL line.
+      - name: Run the browser smoke test
+        run: ./smoke.sh

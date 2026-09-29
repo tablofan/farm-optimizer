@@ -26,9 +26,21 @@ a time budget on a pathological instance.
 > best-of-two greedy (the exact ILP is gated at ≤ 50 pairs regardless). With the cap gone, the
 > plan-diff's "out of range" removal reason collapses into "unaffordable (over every budget)".
 
+> **Update (as it runs today):** "proven optimality" holds only for small instances. The ILP is
+> gated at ≤ 50 pairs (jsLPSolver's branch-and-bound falls off a cliff past ~60), and a real
+> account on a scanned world has tens of thousands of pairs — so in practice the **best-of-two
+> greedy** (per-oasis cheapest-first and global cheapest-pair packing, the better one kept) is what
+> plans. It is flagged optimal only when it places every reachable oasis. The ILP result is used
+> when it is **at least as good** as greedy (more oases; or as many with no more rainbows; a full
+> tie goes to the plan that keeps more current farm-list entries) — a timed-out run included, then
+> labelled "timeboxed, not provably optimal". `opts.maxExactPairs: 0` turns the exact path off.
+
 Formulation (binary `x[o,v]` per feasible oasis-village pair):
 
-- maximize `Σ x[o,v] − ε·Σ cost[o,v]·x[o,v]` (max oases farmed; tie-break to the cheapest packing)
+- maximize `Σ x[o,v] − ε·Σ cost[o,v]·x[o,v] + ε′·Σ keep[o,v]·x[o,v]` (max oases farmed; tie-break to
+  the cheapest packing, then to keeping a current farm-list entry; `ε′ = ε / (oases + 1)`, so all
+  keep bonuses together never outweigh one rainbow — the greedy constructions break cost ties the
+  same way)
 - `Σ_v x[o,v] ≤ 1` for each oasis (an oasis is farmed by at most one village)
 - `Σ_o cost[o,v]·x[o,v] ≤ budget[v]` for each village (rainbow capacity)
 - `cost[o,v] = ceil(2 × travel_time(o,v) / interval)`, `budget[v] = min(selected cavalry counts)`

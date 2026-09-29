@@ -47,7 +47,7 @@ HTML file — is not achievable. Verified live (2026-06-02) against a T4.6 x3 wo
 Therefore the data is reachable only from code running **on the game origin, with the user's
 session** — i.e. a userscript/extension — or from a backend that replays the user's session.
 
-A userscript was confirmed feasible from the user's own `Ash-Warden/standalone/scout_players.py`
+A userscript was confirmed feasible from the user's own earlier (private) map-scouting script
 and the live `adipiciu/TravianResourceBarPlus` userscript: a page-context `fetch` to
 `/api/v1/map/position` with only `Content-Type: application/json` succeeds on the session cookie
 alone; CSP is only `frame-ancestors 'self'` (no `connect-src`/`script-src`), so it does not block

@@ -35,18 +35,25 @@
     return first / fpm + rem / (fpm * tsFactor);
   }
 
+  // ceil that ignores float noise: 10 fields at speed 9 with a 32 s interval is exactly 125 waves,
+  // but the float ratio lands on 125.00000000000001 and a bare ceil charged 126. A whole ratio must
+  // stay whole. Never below 0 (a zero-length trip).
+  var CEIL_EPS = 1e-9;
+  function ceilWaves(x) { return Math.max(0, Math.ceil(x - CEIL_EPS)); }
+
   // Rainbows tied up by farming one oasis = round-trips in flight at steady state.
+  // A non-positive / NaN interval is unaffordable (Infinity), never a NaN cost.
   function oasisCost(travelMin, intervalMin) {
-    if (intervalMin <= 0) return Infinity;
-    return Math.ceil((2 * travelMin) / intervalMin);
+    if (!(intervalMin > 0)) return Infinity;
+    return ceilWaves((2 * travelMin) / intervalMin);
   }
 
   // Outgoing movements one farmed target shows on the game's counter = OUTBOUND waves in flight.
   // The return leg displays in-game as an INCOMING movement, so it is not an outgoing movement —
   // troops are still busy both legs, which is why stock budgets keep using oasisCost (round trip).
   function outgoingMovements(travelMin, intervalMin) {
-    if (intervalMin <= 0) return Infinity;
-    return Math.ceil(travelMin / intervalMin);
+    if (!(intervalMin > 0)) return Infinity;
+    return ceilWaves(travelMin / intervalMin);
   }
 
   // ── Oasis typing ──────────────────────────────────────────────────
@@ -114,6 +121,12 @@
 
     var filter = cfg.resourceFilter || { wood: true, clay: true, iron: true, crop: true };
     var skipped = skipLookup(cfg.skipped);
+    // who farms each tile today — pairs carry `cur` so equal-cost ties break toward the current
+    // holder (keep bias: a move that saves nothing is churn, not an improvement)
+    var curAt = {};
+    (data.farmLists || []).forEach(function (l) {
+      (l.targets || []).forEach(function (t) { (curAt[t.x + '|' + t.y] || (curAt[t.x + '|' + t.y] = {}))[l.villageDid] = true; });
+    });
     var oseen = {};
     var oases = data.oases
       .filter(function (o) { var k = o.x + '|' + o.y; if (oseen[k]) return false; oseen[k] = 1; return true; }) // dedupe by tile
@@ -136,7 +149,8 @@
         var cost = oasisCost(tmin, v.interval);
         var out = outgoingMovements(tmin, v.interval);
         if (!(((override != null ? out : cost)) <= v.budget && isFinite(cost))) return; // unaffordable
-        pairs.push({ oi: oi, vi: vi, cost: cost, out: out, dist: dist, travelMin: tmin });
+        var here = curAt[o.x + '|' + o.y];
+        pairs.push({ oi: oi, vi: vi, cost: cost, out: out, dist: dist, travelMin: tmin, cur: !!(here && here[v.did]) });
       });
     });
 
@@ -160,13 +174,15 @@
   //    20-village one; ties everywhere else. Matches the count of far heavier local-search /
   //    Lagrangian solvers on every benchmark, in ~50-200 ms at 51k-222k pairs.
   // Neither strictly dominates the other (rare ±1 cases both ways), hence best-of-both.
+  // Equal-cost ties go to the pair the village already farms (`cur`), so a tie never reads as a move.
+  function curFirst(a, b) { return (b.cur ? 1 : 0) - (a.cur ? 1 : 0); }
   function greedy(inst) {
     var candByO = {};
     inst.pairs.forEach(function (p) {
       (candByO[p.oi] || (candByO[p.oi] = [])).push(p);
     });
     Object.keys(candByO).forEach(function (oi) {
-      candByO[oi].sort(function (a, b) { return a.cost - b.cost; });
+      candByO[oi].sort(function (a, b) { return a.cost - b.cost || curFirst(a, b); });
     });
     // serve cheapest-to-place oases first
     var order = Object.keys(candByO).map(Number).sort(function (a, b) {
@@ -186,7 +202,7 @@
 
   function greedyPairs(inst) {
     var order = inst.pairs.slice().sort(function (a, b) {
-      return a.cost - b.cost || a.dist - b.dist || a.oi - b.oi || a.vi - b.vi; // deterministic
+      return a.cost - b.cost || curFirst(a, b) || a.dist - b.dist || a.oi - b.oi || a.vi - b.vi; // deterministic
     });
     var remaining = inst.villages.map(function (v) { return v.budget; });
     var assign = {};
@@ -198,9 +214,13 @@
     return finalize(inst, assign);
   }
 
+  // (count, then fewer rainbows, then more keeps) — the last so a tie never adds churn.
+  function atLeastAsGood(b, a) {
+    return b.count > a.count || (b.count === a.count && (b.rainbows < a.rainbows || (b.rainbows === a.rainbows && b.kept >= a.kept)));
+  }
   function bestGreedy(inst) {
     var a = greedy(inst), b = greedyPairs(inst);
-    return (b.count > a.count || (b.count === a.count && b.rainbows < a.rainbows)) ? b : a;
+    return atLeastAsGood(a, b) ? a : b; // a full tie keeps per-oasis greedy, as before
   }
 
   // ── Exact solver via an injected jsLPSolver-compatible solver ───────
@@ -210,13 +230,14 @@
   function solveExact(inst, solver, timeoutMs) {
     var totalCost = inst.pairs.reduce(function (s, p) { return s + p.cost; }, 0);
     var eps = 1 / (totalCost + 1); // count dominates; tie-break to cheapest packing
+    var keepEps = eps / (inst.oases.length + 1); // then to keeps: Σ keep bonus < eps ≤ one rainbow's worth
     var model = { optimize: 'score', opType: 'max', constraints: {}, variables: {}, binaries: {} };
     if (timeoutMs && timeoutMs > 0) model.timeout = timeoutMs;
     inst.oases.forEach(function (o, oi) { model.constraints['o' + oi] = { max: 1 }; });
     inst.villages.forEach(function (v, vi) { model.constraints['v' + vi] = { max: v.budget }; });
     inst.pairs.forEach(function (p, idx) {
       var name = 'x' + idx;
-      var vobj = { score: 1 - eps * p.cost };
+      var vobj = { score: 1 - eps * p.cost + (p.cur ? keepEps : 0) };
       vobj['o' + p.oi] = 1;
       vobj['v' + p.vi] = p.cost;
       model.variables[name] = vobj;
@@ -241,7 +262,7 @@
     var used = inst.villages.map(function () { return 0; });
     var outUsed = inst.villages.map(function () { return 0; });
     var perVillage = inst.villages.map(function () { return []; });
-    var count = 0;
+    var count = 0, kept = 0;
     var byKey = {}; // (oi|vi) -> pair, so finalize is O(P + assigned), not O(P × assigned)
     inst.pairs.forEach(function (p) { byKey[p.oi + '|' + p.vi] = p; });
     Object.keys(assign).forEach(function (oiStr) {
@@ -252,22 +273,24 @@
       outUsed[vi] += pair.out;
       perVillage[vi].push({ oi: oi, cost: pair.cost, out: pair.out, dist: pair.dist, travelMin: pair.travelMin });
       count++;
+      if (pair.cur) kept++;
     });
     // rainbows = troops of each selected type tied up (round trip); movements = the game's
     // OUTGOING counter (outbound waves only — the return leg shows in-game as incoming)
     var rainbows = used.reduce(function (s, u) { return s + u; }, 0);
     var movements = outUsed.reduce(function (s, u) { return s + u; }, 0);
+    // kept = assigned oases the village already farms (a keep in the plan diff, not a move)
     return { assign: assign, count: count, used: used, outUsed: outUsed, perVillage: perVillage,
-             movements: movements, rainbows: rainbows };
+             movements: movements, rainbows: rainbows, kept: kept };
   }
 
   // opts: { solver, maxExactPairs, exactTimeoutMs }
   // exactTimeoutMs (default 10s) timeboxes the ILP: a timed-out run yields the best solution
-  // found so far, used only if it beats greedy (more oases, or same oases for fewer rainbows)
-  // and labelled as not provably optimal.
+  // found so far, used if it is at least as good as greedy (more oases, or the same oases for
+  // fewer rainbows, or a full tie with no fewer keeps) and labelled as not provably optimal.
   // maxExactPairs defaults to 50 — measured cliff for jsLPSolver's branch-and-bound on this
   // problem shape: 49 pairs = 36 ms, 62 pairs = 15 s, 78 pairs > 5 min. Beyond it the ILP
-  // attempt just burns the full timeout and loses to greedy.
+  // attempt just burns the full timeout and loses to greedy. 0 turns the exact path off.
   function solve(inst, opts) {
     opts = opts || {};
     var g = bestGreedy(inst);
@@ -276,14 +299,14 @@
       // greedy estimate, not provably minimal — the exact path's ε-term would shave it.
       return Object.assign(g, { method: 'greedy (count-optimal — every reachable oasis placed)', optimal: true });
     }
-    var limit = opts.maxExactPairs || 50;
+    var limit = opts.maxExactPairs != null ? opts.maxExactPairs : 50;
     var timeoutMs = opts.exactTimeoutMs != null ? opts.exactTimeoutMs : 10000;
-    if (opts.solver && inst.pairs.length <= limit) {
+    if (opts.solver && limit > 0 && inst.pairs.length <= limit) {
       try {
         var t0 = Date.now();
         var e = solveExact(inst, opts.solver, timeoutMs);
         var timedOut = timeoutMs > 0 && (Date.now() - t0) >= timeoutMs;
-        var better = e && (e.count > g.count || (e.count === g.count && e.rainbows <= g.rainbows));
+        var better = e && atLeastAsGood(e, g);
         if (better && !timedOut) {
           return Object.assign(e, { method: 'exact ILP (jsLPSolver)', optimal: true });
         }
@@ -293,7 +316,8 @@
       } catch (err) { /* fall through to greedy */ }
     }
     var note = opts.solver
-      ? (inst.pairs.length > limit
+      ? (limit <= 0 ? 'greedy heuristic (exact solver turned off)'
+        : inst.pairs.length > limit
           ? 'greedy heuristic (instance too large for exact: ' + inst.pairs.length + ' pairs)'
           : 'greedy heuristic (ILP found nothing better within ' + Math.round(timeoutMs / 1000) + 's)')
       : 'greedy heuristic (no ILP solver loaded)';
@@ -356,18 +380,19 @@
     var allFreeByKey = {};
     (data.oases || []).forEach(function (o) { allFreeByKey[key(o.x, o.y)] = o; });
 
-    // current: oasisKey -> [villageDid] (only free-oasis targets are in scope)
+    // current: oasisKey -> [{ did, list }] — one per list ENTRY (only free-oasis targets are in scope)
     var curByKey = {};
     (data.farmLists || []).forEach(function (list) {
       (list.targets || []).forEach(function (t) {
         var k = key(t.x, t.y);
         if (!allFreeByKey[k]) return; // village / occupied oasis -> ignore
-        (curByKey[k] || (curByKey[k] = [])).push(list.villageDid);
+        (curByKey[k] || (curByKey[k] = [])).push({ did: list.villageDid, list: list.name });
       });
     });
 
     var vName = {};
     (data.villages || []).forEach(function (v) { vName[v.did] = v.name; });
+    function inList(c) { return c.list ? ' (list "' + c.list + '")' : ''; }
 
     var rows = [];
     // additions / keeps / moves from the optimal set (one oasis -> one village)
@@ -375,29 +400,32 @@
       var o = freeByKey[k];
       var optDid = optByKey[k];
       var cur = curByKey[k] || [];
-      var isKeep = cur.indexOf(optDid) !== -1;
+      var isKeep = cur.some(function (c) { return c.did === optDid; });
       var status = cur.length === 0 ? 'add' : (isKeep ? 'keep' : 'move');
-      var fromDid = isKeep ? null : (cur.length ? cur[0] : null);
+      var fromDid = isKeep ? null : (cur.length ? cur[0].did : null);
       rows.push(row(o, status, optDid, fromDid, vName, null));
-      // enforce the one-village rule: any OTHER village currently farming this oasis must drop it.
-      // (the keep/move row already accounts for `optDid` and, for a move, the representative `fromDid`.)
-      var covered = isKeep ? optDid : fromDid;
-      cur.forEach(function (d) {
-        if (d !== covered && d !== optDid) {
-          rows.push(row(o, 'remove', null, d, vName, 'duplicate — keep only on ' + (vName[optDid] || optDid)));
-        }
+      // enforce one ENTRY per oasis: the keep/move row accounts for exactly one entry of the covered
+      // village; every other entry must go — another village's, or a second entry in the covered
+      // village's own lists (else applying the plan leaves the oasis farmed twice).
+      var covered = isKeep ? optDid : fromDid, coveredSeen = false;
+      cur.forEach(function (c) {
+        if (!coveredSeen && c.did === covered) { coveredSeen = true; return; }
+        rows.push(row(o, 'remove', null, c.did, vName, c.did === optDid
+          ? 'duplicate — ' + (vName[optDid] || optDid) + ' already farms it from another entry' + inList(c)
+          : 'duplicate — keep only on ' + (vName[optDid] || optDid) + inList(c)));
       });
     });
     // removals: current free-oasis targets the plan does not keep at all
     Object.keys(curByKey).forEach(function (k) {
       if (optByKey[k]) return; // handled above (keep/move)
       var o = allFreeByKey[k];
+      // an oasis whose bonus never parsed has no resource bucket, so no filter setting admits it
       var reason = skippedKey[k] ? 'skipped'
-        : !freeByKey[k] ? 'excluded by resource filter'
+        : !freeByKey[k] ? (primaryRes(o.bonuses) ? 'excluded by resource filter' : 'bonus unreadable — rescan to classify it')
         : !reachableByKey[k] ? 'unaffordable (cost exceeds every budget)'
         : 'over capacity / not optimal';
-      curByKey[k].forEach(function (fromDid) {
-        rows.push(row(o, 'remove', null, fromDid, vName, reason));
+      curByKey[k].forEach(function (c) {
+        rows.push(row(o, 'remove', null, c.did, vName, reason));
       });
     });
     return rows;
@@ -569,7 +597,7 @@
     opts = opts || {};
     var tol = opts.toleranceMin != null ? opts.toleranceMin : 2;
     var maxPasses = opts.maxPasses != null ? opts.maxPasses : 25;
-    var V = inst.villages.length;
+    var V = inst.villages.length, F = inst.farms.length;
 
     // travel + waves per farm × village (waves = round-trips in flight — the stock tied up;
     // out = outbound waves only — the game's outgoing-movement counter; same physics as oases)
@@ -581,56 +609,77 @@
                  out: outgoingMovements(tmin, v.interval) };
       });
     });
-    function demand(fi, vi) { // per-slot troops tied up by farm fi if held by village vi
-      var f = inst.farms[fi], w = cache[fi][vi].waves, d = {};
-      Object.keys(f.comp).forEach(function (s) { if (f.comp[s] > 0) d[s] = f.comp[s] * w; });
-      return d;
-    }
+    // per-slot troops tied up by farm fi if held by village vi, precomputed once as [[slot, n], …]
+    // (the repair loop asks this millions of times on a big overload)
+    var dem = inst.farms.map(function (f, fi) {
+      var slots = Object.keys(f.comp).filter(function (s) { return f.comp[s] > 0; });
+      return inst.villages.map(function (v, vi) {
+        return slots.map(function (s) { return [s, f.comp[s] * cache[fi][vi].waves]; });
+      });
+    });
+    // receiving villages per farm, nearest first — a repair takes the first one that fits
+    var nearest = inst.farms.map(function (f, fi) {
+      return inst.villages.map(function (v, vi) { return vi; }).sort(function (a, b) {
+        return cache[fi][a].travelMin - cache[fi][b].travelMin || a - b;
+      });
+    });
 
     var assign = inst.farms.map(function (f) { return f.curVi; });
     var usage = inst.villages.map(function () { return {}; }); // vi -> slot -> troops used
     function addUsage(fi, vi, sign) {
-      var d = demand(fi, vi);
-      Object.keys(d).forEach(function (s) { usage[vi][s] = (usage[vi][s] || 0) + sign * d[s]; });
+      dem[fi][vi].forEach(function (d) { usage[vi][d[0]] = (usage[vi][d[0]] || 0) + sign * d[1]; });
     }
     inst.farms.forEach(function (f, fi) { addUsage(fi, f.curVi, +1); });
 
-    function overSlots(vi) {
-      var out = [];
-      Object.keys(usage[vi]).forEach(function (s) {
-        if (usage[vi][s] > (inst.villages[vi].stocks[s] || 0)) out.push(s);
-      });
-      return out;
-    }
+    function stock(vi, s) { return inst.villages[vi].stocks[s] || 0; }
+    // NaN-safe: a non-finite demand (a bad interval) reads as over and gets reported — never as fine
+    function isOver(vi, s) { return !((usage[vi][s] || 0) <= stock(vi, s)); }
+    function overSlots(vi) { return Object.keys(usage[vi]).filter(function (s) { return isOver(vi, s); }); }
     function fits(fi, vi) { // hard-move rule: the destination absorbs the whole demand in stock
-      var d = demand(fi, vi);
-      return Object.keys(d).every(function (s) {
-        return (usage[vi][s] || 0) + d[s] <= (inst.villages[vi].stocks[s] || 0);
-      });
+      return dem[fi][vi].every(function (d) { return (usage[vi][d[0]] || 0) + d[1] <= stock(vi, d[0]); });
     }
+    // a farm whose current demand is non-finite can't be subtracted cleanly (∞ − ∞) — it stays put
+    function movable(fi) { return isFinite(cache[fi][assign[fi]].waves); }
     function move(fi, vi) { addUsage(fi, assign[fi], -1); assign[fi] = vi; addUsage(fi, vi, +1); }
 
-    // Phase A — overload repair (forced moves): while a village is over stock on some slot,
-    // move one of its farms whose comp uses an over slot to the village that can absorb it
-    // with the LEAST travel ("the farms closest to the receiving village move first").
-    var guard = inst.farms.length * V + 10;
+    // Phase A — overload repair (forced moves): while a village is over stock on some slot, move
+    // one of its farms whose comp uses an over slot. Prefer a farm whose move ALONE clears every
+    // over slot (one move, not several); among equals, the one closest to a village that can
+    // absorb it ("the farms closest to the receiving village move first").
+    var guard = F * V + 10;
+    function clearsAlone(fi, vi, over) {
+      return over.every(function (s) {
+        var d = 0;
+        dem[fi][vi].forEach(function (x) { if (x[0] === s) d = x[1]; });
+        return usage[vi][s] - d <= stock(vi, s);
+      });
+    }
     function phaseA() {
       var any = false;
       for (var vi = 0; vi < V; vi++) {
-        var spin = 0;
-        while (overSlots(vi).length && spin++ < guard) {
-          var over = {};
-          overSlots(vi).forEach(function (s) { over[s] = true; });
+        var spin = 0, over;
+        // a non-finite slot (a bad interval or speed) can't be repaired by moving farms — it is
+        // only reported; repairing the finite over slots still makes sense
+        function repairable() { return overSlots(vi).filter(function (s) { return isFinite(usage[vi][s]); }); }
+        while ((over = repairable()).length && spin++ < guard) {
+          var overSet = {};
+          over.forEach(function (s) { overSet[s] = true; });
           var best = null;
-          inst.farms.forEach(function (f, fi) {
-            if (assign[fi] !== vi) return;
-            if (!Object.keys(f.comp).some(function (s) { return f.comp[s] > 0 && over[s]; })) return;
-            for (var wi = 0; wi < V; wi++) {
+          for (var fi = 0; fi < F; fi++) {
+            if (assign[fi] !== vi || !movable(fi)) continue;
+            if (!dem[fi][vi].some(function (d) { return overSet[d[0]]; })) continue;
+            var enough = null; // computed lazily — only once a receiver exists
+            for (var k = 0; k < V; k++) {
+              var wi = nearest[fi][k];
               if (wi === vi || !fits(fi, wi)) continue;
               var t = cache[fi][wi].travelMin;
-              if (!best || t < best.t) best = { fi: fi, wi: wi, t: t };
+              if (enough === null) enough = clearsAlone(fi, vi, over);
+              if (!best || (enough && !best.enough) || (enough === best.enough && t < best.t)) {
+                best = { fi: fi, wi: wi, t: t, enough: enough };
+              }
+              break; // nearest receiver that fits — any later one is farther
             }
-          });
+          }
           if (!best) break; // nothing legal helps right now — maybe after a Phase B sweep
           move(best.fi, best.wi); any = true;
         }
@@ -638,31 +687,51 @@
       return any;
     }
     // Phase B — keep-biased improvement: a farm moves only if it saves >= tol minutes one-way
-    // AND the destination absorbs it (one sweep; returns whether anything moved).
+    // (and strictly more than 0, so toleranceMin 0 can't bounce a tie) AND the destination
+    // absorbs it (one sweep; returns whether anything moved).
     function phaseB() {
       var moved = false;
-      inst.farms.forEach(function (f, fi) {
+      for (var fi = 0; fi < F; fi++) {
+        if (!movable(fi)) continue;
         var cur = assign[fi], curT = cache[fi][cur].travelMin;
         var best = null;
         for (var wi = 0; wi < V; wi++) {
           if (wi === cur) continue;
-          var t = cache[fi][wi].travelMin;
-          if (curT - t < tol) continue;
+          var t = cache[fi][wi].travelMin, gain = curT - t;
+          if (!(gain >= tol && gain > 0)) continue;
           if (!fits(fi, wi)) continue;
           if (!best || t < best.t) best = { wi: wi, t: t };
         }
         if (best) { moved = true; move(fi, best.wi); }
-      });
+      }
+      return moved;
+    }
+    // Phase C — undo repairs that are no longer needed: a farm away from its original holder goes
+    // back once home can absorb it again, unless where it sits now saves >= tol (Phase B would
+    // have moved it there anyway). Phase A can over-repair — e.g. push a small farm out before the
+    // big one whose move then clears the overload by itself — and B alone never undoes that.
+    function phaseC() {
+      var moved = false;
+      for (var fi = 0; fi < F; fi++) {
+        var home = inst.farms[fi].curVi, cur = assign[fi];
+        if (cur === home || !movable(fi)) continue;
+        if (cache[fi][home].travelMin - cache[fi][cur].travelMin >= tol) continue;
+        if (!fits(fi, home)) continue;
+        move(fi, home); moved = true;
+      }
       return moved;
     }
     // Alternate to a JOINT fixpoint: a Phase B move can free exactly the receiver capacity a
     // stuck Phase A repair needed (B itself would never make that repair — it may increase the
-    // moved farm's travel). Terminates: A strictly shrinks total overload and never creates any;
-    // B strictly shrinks total travel (>= tol per move) and never adds overload — so the
-    // (overload, travel) pair decreases lexicographically with every move.
+    // moved farm's travel), and either can make an earlier repair unnecessary (C). Terminates:
+    // A strictly shrinks total overload and never creates any; B strictly shrinks total travel
+    // and never adds overload; C never adds overload and returns each farm home at most once —
+    // after a return, home is within stock on that farm's slots and only fitting moves enter it,
+    // so A never pushes it out again, and B only takes it where C would leave it. maxPasses is a
+    // backstop, not the stopping rule.
     for (var round = 0; round < maxPasses; round++) {
-      var a = phaseA(), b = phaseB();
-      if (!a && !b) break;
+      var a = phaseA(), b = phaseB(), c = phaseC();
+      if (!a && !b && !c) break;
     }
 
     // result rows (keep / move — the farm set is fixed, nothing is added or removed)
@@ -679,7 +748,7 @@
       var perSlot = {};
       Object.keys(usage[vi]).forEach(function (s) {
         perSlot[s] = { used: usage[vi][s], stock: v.stocks[s] || 0 };
-        if (usage[vi][s] > (v.stocks[s] || 0)) {
+        if (isOver(vi, s)) {
           shortfalls.push({ did: v.did, name: v.name, slot: s,
                             used: usage[vi][s], stock: v.stocks[s] || 0,
                             short: usage[vi][s] - (v.stocks[s] || 0) });

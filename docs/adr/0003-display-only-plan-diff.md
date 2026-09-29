@@ -17,8 +17,8 @@ are ignored — never flagged, moved, or removed.
 
 ## Context
 
-The userscript is technically capable of writing farm lists in-game (`Ash-Warden`'s
-`add_to_farmlist.py` demonstrates it), so auto-apply was a real option. It was rejected: the user
+The userscript is technically capable of writing farm lists in-game (the user's own earlier,
+private tooling adds farm-list entries that way), so auto-apply was a real option. It was rejected: the user
 wants a review-and-act report, not unattended mutation of their account. Farm lists also legitimately
 contain non-oasis targets (player villages, occupied oases the player clears) that the optimizer knows
 nothing about; touching them would be destructive.

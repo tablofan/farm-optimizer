@@ -39,6 +39,16 @@ the player's villages. Its shape:
   warning.
 - **Display-only diff, keep / move only** (per ADR-0003's ethos) — nothing is ever added or removed.
 
+> **Update (review fixes):** three churn sources were closed. (1) Overload repair now prefers a farm
+> whose move **alone** clears every over slot (the tie-break is still "closest to a receiver that
+> can absorb it"), instead of moving the nearest farm even when it frees too little — a 1-troop
+> farm no longer leaves ahead of the 100-troop one that actually has to go. (2) A third pass
+> **returns a farm home** once its original village can absorb it again, unless its new holder
+> saves ≥ 2 min — so a repair made unnecessary by a later move is undone (each farm returns at most
+> once, which keeps the loop finite). (3) An improvement move needs a strictly positive saving, so
+> a tolerance of 0 can't bounce a farm between two equidistant villages. A broken interval (0 /
+> NaN) reads as an unrepairable shortfall, never as "fits".
+
 ## Context
 
 The farm lists already contain the player's PvP farms with hand-tuned sends; what drifts out of
@@ -71,7 +81,9 @@ is claimed by neither side until its role is set explicitly.
 ## Consequences
 
 - The farm-list parser must capture per-entry send compositions (today: coordinates only) — new
-  selectors to `VALIDATE LIVE`; the data contract's `targets` entries grow a per-unit comp.
+  selectors to `VALIDATE LIVE`; the data contract's `targets` entries grow a per-unit comp. (The
+  village / farm-list / troop selectors have since been fixed against the live DOM in 28db002; the
+  per-entry comp parse is the one still marked `VALIDATE LIVE`.)
 - `config.perVillage[did].inc` migrates to `role` under the same evidence rule: `inc:false` →
   `pvp` if the village holds PvP farms (even alongside oasis farms — the player had already opted
   it out of oasis farming), else `off`; unset → the derived defaults above. **Empty villages now
