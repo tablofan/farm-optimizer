@@ -151,8 +151,26 @@ window.addEventListener('load', async () => {
     log(poolUsed <= 40, 'pooled consumption stays within the 40-movement budget', poolUsed + ' / 40');
     log(/Movements used \/ budget/i.test($('mpCards').textContent), 'pooled budget card renders');
     log(/Account/.test(mpRows[mpRows.length - 1].textContent), 'account totals row present');
-    log($('mpTable').querySelectorAll('.vgroup').length >= 1, 'assignment listing grouped by village');
     log(W.JSON.parse(W.localStorage.getItem('pveData')).config.movementBudget === 40, 'Movement budget persisted');
+    // the planner's result is a plan diff vs the current farm lists, like the Oasis Optimizer's
+    const mpStored = () => W.JSON.parse(W.localStorage.getItem('pveData'));
+    log($('mpTable').querySelectorAll('.vgroup').length >= 1, 'planner plan diff grouped by village');
+    log($('mpFilters').querySelectorAll('label').length === 4, 'planner has add/move/keep/remove toggles');
+    const mpBadges = Array.prototype.map.call($('mpTable').querySelectorAll('.badge'), b => b.textContent);
+    log(mpBadges.length > 0 && mpBadges.every(x => /^(add|move|keep|remove)$/.test(x)), 'planner rows carry diff badges', JSON.stringify(Array.from(new Set(mpBadges))));
+    log(mpBadges.indexOf('keep') >= 0, 'oases farmed today and kept show as keep');
+    const mpHead = $('mpTable').querySelector('table th:nth-child(4)');
+    log(!!mpHead && mpHead.textContent === 'Moves', 'planner diff has a Moves column', mpHead && mpHead.textContent);
+    const mpKeep = $('mpFilters').querySelector('label[data-st="keep"] input');
+    mpKeep.click(); await tick(50);
+    log(mpStored().config.planDiffFilters.keep === false && mpStored().config.diffFilters.keep !== false, 'planner toggles persist separately from the optimizer\'s');
+    log(!Array.prototype.some.call($('mpTable').querySelectorAll('.badge'), b => b.textContent === 'keep'), 'unticking keep hides keep rows');
+    mpKeep.click(); await tick(50);
+    const mpSkipBtn = $('mpTable').querySelector('button.skip'), mpSkipKey = mpSkipBtn && mpSkipBtn.getAttribute('data-key');
+    mpSkipBtn.click(); await tick(50);
+    log(mpStored().skipped.indexOf(mpSkipKey) >= 0 && /will skip on next Calculate/.test($('mpTable').textContent), 'skip from the planner: shared skip list, note names Calculate', mpSkipKey);
+    $('mpTable').querySelector('button.unskip[data-key="' + mpSkipKey + '"]').click(); await tick(50);
+    log(mpStored().skipped.indexOf(mpSkipKey) < 0, 'unskip from the planner');
 
     // ════ data-safety / review-fix checks ════
     const fire = (el, type) => el.dispatchEvent(new W.Event(type, { bubbles: true }));
@@ -337,6 +355,23 @@ window.addEventListener('load', async () => {
     W.Storage.prototype.setItem = origSet;
     const tsIn2 = rowOf('A001').querySelector('.vts'); tsIn2.value = '1'; fire(tsIn2, 'input');
     log($('storeWarn').classList.contains('hidden'), 'banner clears once a save succeeds');
+
+    // two calculator tabs (e.g. yours + the one the collector opened): a save in one must not undo
+    // an edit made in the other — the "TS level doesn't save" report
+    const f2 = document.createElement('iframe'); f2.style.cssText = 'width:1200px;height:800px';
+    await new Promise(r => { f2.onload = r; f2.src = 'index.html'; document.body.appendChild(f2); });
+    await tick(300);
+    const W2 = f2.contentWindow, D2 = f2.contentDocument, did1 = rowOf('A001').getAttribute('data-did');
+    const tabBefore = D.querySelector('.tabpane.on').id;
+    const ts1 = rowOf('A001').querySelector('.vts'); ts1.value = '7'; fire(ts1, 'input'); fire(ts1, 'change');
+    await tick(200);
+    log(D2.querySelector('#vilTable tr[data-did="' + did1 + '"] .vts').value === '7', 'the second tab picks up a TS edit from the first');
+    const gi2 = D2.getElementById('gIntSec'); gi2.value = '299'; gi2.dispatchEvent(new W2.Event('input', { bubbles: true }));
+    await tick(200);
+    log(stored().config.perVillage[did1].ts === 7, 'a save in the second tab keeps the first tab\'s TS edit', String(stored().config.perVillage[did1].ts));
+    log($('gIntSec').value === '299' && /another calculator tab/.test(status()), 'the first tab adopts the second tab\'s save', $('gIntSec').value);
+    log(D.querySelector('.tabpane.on').id === tabBefore, 'syncing leaves the tab on screen alone', D.querySelector('.tabpane.on').id);
+    f2.remove();
 
     // a corrupt saved blob (non-string server) recovers on reload
     const corrupt = Object.assign(JSON.parse(exported), { server: 123, farmLists: [null].concat(JSON.parse(exported).farmLists) });

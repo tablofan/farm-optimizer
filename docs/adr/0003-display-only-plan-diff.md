@@ -35,3 +35,6 @@ nothing about; touching them would be destructive.
   over capacity / not optimal, excluded by the resource filter, or duplicate.)
 - A future "apply in-game" mode remains possible but is intentionally out of scope; revisit only with
   explicit per-action confirmation.
+- The Movement planner (2026-09-29) shows the same diff for its pooled-budget assignment, so the
+  same rules apply there. Its capacity reasons name the pool instead: "over the movement budget",
+  and "unaffordable (needs more movements than the whole budget)".

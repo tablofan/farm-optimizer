@@ -26,8 +26,8 @@ The Tampermonkey userscript that runs on the gameworld and gathers the data — 
 **Calculator**:
 The static `index.html` page that imports the **Collector**'s data and presents it in tabs: a data /
 village tab (import, global settings, **Roles**), the oasis optimizer, the **Oasis browser**, the
-**PvP optimizer**, and the **Movement planner**. Each optimizer displays its result as a **Plan diff** against the current farm
-lists (the **Movement planner**, being hypothetical, shows no diff). Display only — the player
+**PvP optimizer**, and the **Movement planner**. Each optimizer — and the **Movement planner** —
+displays its result as a **Plan diff** against the current farm lists. Display only — the player
 applies changes by hand.
 
 **Farm list**:
@@ -185,10 +185,15 @@ Role-PvE **Village** with one pooled **Movement budget** in place of every **Cap
 account-wide — each oasis by at most one village, served by whichever village farms it cheapest —
 and reports each village's pool draw (**Outgoing movements**) alongside the cavalry stock to train
 (1 of each selected type per round-trip **Rainbow** — roughly double the movements drawn, shown with
-the gap against today's stock). Purely hypothetical and display-only: there
-is no **Plan diff** — **Current farm lists** are shown per-oasis as information, never reconciled.
-It honors **Skipped oases** and carries its own resource filter and its own cavalry selection
-(seeded from the oasis optimizer's).
+the gap against today's stock). The assignment is shown as a **Plan diff** against the **Current
+farm lists** — the oasis optimizer's add / move / keep / remove, with each oasis's movement draw —
+so a chosen budget turns straight into farm-list edits; troop stocks still play no part, so an
+add may need troops the village doesn't have yet (the to-train column). Ties go to the village
+that farms the oasis today. It honors **Skipped oases** (skipping from either diff is the same
+global opt-out) and carries its own resource filter, its own cavalry selection (seeded from the
+oasis optimizer's) and its own diff status toggles.
+_Was_, until 2026-09-29: display-only with no **Plan diff** — current lists shown per oasis as
+information.
 _Avoid_: what-if (descriptive only), troop planner, movement simulator.
 
 **Movement budget**:

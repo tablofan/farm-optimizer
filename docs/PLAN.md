@@ -22,9 +22,12 @@ a **Collector** userscript and a static **Calculator** page.
 > pairs that could never fit; `solvePool` enforces the pooled ceiling — cheapest-village,
 > cheapest-first, provably optimal, no ILP), reporting per village the outgoing movements drawn
 > from the pool plus the stock of each selected cavalry type to train (= round-trip rainbows,
-> roughly double the movements drawn). Display only, no plan diff; it carries its own
-> cavalry picker (seeded from the optimizer's) and resource filter. (_Was_, same day: a uniform
-> per-village budget — changed to one shared pool.)
+> roughly double the movements drawn), plus a **plan diff** vs the current farm lists (add / move /
+> keep / remove, the oasis optimizer's renderer with its own status toggles and a per-oasis Moves
+> column). It carries its own cavalry picker (seeded from the optimizer's) and resource filter.
+> (_Was_, same day: a uniform per-village budget — changed to one shared pool. _Was_, until
+> 2026-09-29: display only, no plan diff — the assignment listed per village with farm-list
+> membership as info.)
 
 ## Components
 

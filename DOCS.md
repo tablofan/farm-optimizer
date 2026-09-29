@@ -70,11 +70,13 @@ the PvP rebalancer), and `docs/PLAN.md` for the build plan / data contract.
      part in the solve). Each oasis goes to whichever village farms it cheapest, so cheapest-first
      greedy is provably optimal — no ILP involved. Reports per village the outgoing movements
      drawn from the pool *and* the stock of **each** selected cavalry type needed (= round-trip
-     rainbows, roughly double the movements), with a **to-train** gap vs today's stock,
-     plus the assignment grouped by village (farm-list membership shown per oasis as info — no
-     plan diff) and leftovers as a summary count. It carries its **own** cavalry picker (seeded
-     from the optimizer's selection) and resource filter, so hypotheticals never reconfigure the
-     real plan.
+     rainbows, roughly double the movements), with a **to-train** gap vs today's stock, plus the
+     same **plan diff** as the Oasis Optimizer (add / move / keep / remove vs the current farm
+     lists, grouped by village, skip buttons) with a **Moves** column — the outgoing movements
+     each oasis draws from the pool. Enter the movements you want, Calculate, and the diff says
+     which list entries to change. Ties go to the village that farms an oasis today. It carries
+     its **own** cavalry picker (seeded from the optimizer's selection), resource filter and diff
+     status toggles, so hypotheticals never reconfigure the real plan; skips are shared.
 
    *Why send the page, not the map?* Villages/farm-lists/troops all live on one rendered page each
    (Send page captures them). The **map** doesn't: it renders as raster image tiles with no per-tile

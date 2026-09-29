@@ -102,21 +102,22 @@
        zigzagging. No max-width — result tables fill their section block. */
     #diffTable table, #pvpTable table, #mpTable table, #brTable { table-layout: fixed; }
     #diffTable td, #pvpTable td, #mpTable td, #brTable td { overflow: hidden; text-overflow: ellipsis; }
-    #diffTable th:nth-child(1), #pvpTable th:nth-child(1) { width: 84px; }
-    #diffTable th:nth-child(2), #pvpTable th:nth-child(2) { width: 110px; }
-    #diffTable th:nth-child(3) { width: 70px; }
-    #diffTable th:nth-child(4) { width: 330px; }
-    #diffTable th:nth-child(5) { width: 300px; }
-    /* planner + browser share the same column grid as the diff: coords 110, numerics 70, Type 330 */
-    #mpTable th:nth-child(1), #brTable th:nth-child(1) { width: 110px; }
-    #mpTable th:nth-child(2), #mpTable th:nth-child(3), #brTable th:nth-child(2) { width: 70px; }
-    #mpTable th:nth-child(4), #brTable th:nth-child(3) { width: 330px; }
+    /* the planner's diff (#mpTable) = the oasis diff plus a Moves column after Dist */
+    #diffTable th:nth-child(1), #mpTable th:nth-child(1), #pvpTable th:nth-child(1) { width: 100px; }
+    #diffTable th:nth-child(2), #mpTable th:nth-child(2), #pvpTable th:nth-child(2) { width: 110px; }
+    #diffTable th:nth-child(3), #mpTable th:nth-child(3), #mpTable th:nth-child(4) { width: 70px; }
+    #diffTable th:nth-child(4), #mpTable th:nth-child(5) { width: 330px; }
+    #diffTable th:nth-child(5), #mpTable th:nth-child(6) { width: 300px; }
+    /* the browser shares the same column grid: coords 110, numerics 70, Type 330 */
+    #brTable th:nth-child(1) { width: 110px; }
+    #brTable th:nth-child(2) { width: 70px; }
+    #brTable th:nth-child(3) { width: 330px; }
     #pvpTable th:nth-child(3) { width: 150px; }
     #pvpTable th:nth-child(4) { width: 280px; }
     #pvpTable th:nth-child(5) { width: 70px; }
     #pvpTable th:nth-child(6) { width: 130px; }
-    #diffTable .t-skip th:nth-child(1) { width: 110px; }
-    #diffTable .t-skip th:nth-child(2) { width: 330px; }
+    #diffTable .t-skip th:nth-child(1), #mpTable .t-skip th:nth-child(1) { width: 110px; }
+    #diffTable .t-skip th:nth-child(2), #mpTable .t-skip th:nth-child(2) { width: 330px; }
     .push { margin-left: auto; }
     .scroll { overflow: auto; max-height: 520px; scrollbar-width: thin; scrollbar-color: #383027 transparent; }
     a { color: var(--gold-soft); text-decoration: none; }
@@ -302,10 +303,11 @@
         </div>
       </div>
       <div class="section hidden" id="secPlanRes">
-        <div class="section-title">What it takes <span class="muted" style="text-transform:none;letter-spacing:0">— display only: current farm lists play no part in the solve and are shown per oasis as information</span></div>
+        <div class="section-title">What it takes <span class="muted" style="text-transform:none;letter-spacing:0">— the plan vs your current farm lists (add / move / keep / remove, like the Oasis Optimizer), plus the troops each village would need</span></div>
         <div class="cards" id="mpCards"></div>
         <div class="scroll" style="margin-top:4px"><table id="mpTroops"></table></div>
-        <div class="scroll" style="margin-top:14px"><div id="mpTable"></div></div>
+        <div class="row" id="mpFilters" style="margin:14px 0 10px"></div>
+        <div class="scroll"><div id="mpTable"></div></div>
       </div>
     </div>
   </div>
@@ -314,8 +316,8 @@
        fresh index.html paired with a stale cached script fails silently (seen live: a cached
        pre-solvePool optimizer.js made the Movement planner's Calculate a no-op). Bump BOTH when
        either file changes; the boot guard below catches a mismatch that slips through anyway. -->
-  <script src="cavalry.js?v=4"></script>
-  <script src="optimizer.js?v=4"></script>
+  <script src="cavalry.js?v=5"></script>
+  <script src="optimizer.js?v=5"></script>
   <!-- exact ILP solver (pure JS, no build). Falls back to greedy if unavailable. SRI-pinned to the
        exact 0.4.24 file (a changed CDN copy is refused -> greedy). defer: boot never waits on the
        CDN — the solver is only read lazily at Optimise time (getSolver). -->
@@ -362,13 +364,14 @@
     // ── canonical accumulating state (persisted in THIS origin's localStorage) ──
     var STORE = 'pveData'; // key name is historical (pre-rename) — kept so existing data survives
     // `skipped` = ["x|y", …] global per-oasis opt-outs (persisted). `config` = the single global
-    // sending interval (seconds) + the Movement budget + diff status toggles (both tabs) +
+    // sending interval (seconds) + the Movement budget + diff status toggles (all three tabs) +
     // active tab + per-village TS/artefact/Role (persisted; not parsed from the game).
-    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, movementBudget: 1000, diffFilters: { add: true, move: true, keep: true, remove: true }, pvpDiffFilters: { move: true, keep: true }, activeTab: 'data', perVillage: {} } }; }
+    function blank() { return { server: '', tribe: 'huns', mapRadius: 200, scannedAt: '', villages: [], oases: [], farmLists: [], pendingTroops: { byDid: {}, byName: {} }, skipped: [], config: { intervalSec: 300, movementBudget: 1000, diffFilters: { add: true, move: true, keep: true, remove: true }, pvpDiffFilters: { move: true, keep: true }, planDiffFilters: { add: true, move: true, keep: true, remove: true }, activeTab: 'data', perVillage: {} } }; }
     var STATE = { data: blank(), units: null, controls: false, storeFail: false };
     // every save reports: while storage fails, the #storeWarn banner stays up (all tabs) and
     // applyData's status says "not saved"; the first save that works clears both. Returns success.
     function persist() {
+      if (STATE.syncing) return true; // adopting another tab's save (see the 'storage' listener) — never write it back
       var ok = true;
       try { localStorage.setItem(STORE, JSON.stringify(STATE.data)); } catch (e) { ok = false; }
       STATE.storeFail = !ok; $('storeWarn').classList.toggle('hidden', ok);
@@ -395,6 +398,7 @@
       delete d.config.maxTravelMin; // travel cap removed (see ADR-0002 update) — drop the stale key
       d.config.diffFilters = normFilters(d.config.diffFilters);
       d.config.pvpDiffFilters = normPvpFilters(d.config.pvpDiffFilters);
+      d.config.planDiffFilters = normFilters(d.config.planDiffFilters);
       if (['data', 'oasis', 'browse', 'pvp', 'plan'].indexOf(d.config.activeTab) < 0) d.config.activeTab = 'data';
       d.config.perVillage = normPv(d.config.perVillage); // roles: only the three valid values stick
     }
@@ -623,6 +627,7 @@
           nd.config.movementBudget = intBudget(obj.config.movementBudget);
           nd.config.diffFilters = normFilters(obj.config.diffFilters);
           nd.config.pvpDiffFilters = normPvpFilters(obj.config.pvpDiffFilters);
+          nd.config.planDiffFilters = normFilters(obj.config.planDiffFilters);
           nd.config.perVillage = normPv(obj.config.perVillage);
         }
         obj.villages.forEach(function (v) {
@@ -659,7 +664,7 @@
       var d = STATE.data, c = d.config;
       if (!d.villages.length && !d.oases.length) { status('Nothing to export yet.', true); return; }
       var out = { server: d.server, tribe: d.tribe, mapRadius: d.mapRadius, scannedAt: d.scannedAt, villages: d.villages, oases: d.oases, farmLists: d.farmLists, skipped: d.skipped,
-                  config: { intervalSec: c.intervalSec, movementBudget: c.movementBudget, diffFilters: c.diffFilters, pvpDiffFilters: c.pvpDiffFilters, perVillage: c.perVillage } };
+                  config: { intervalSec: c.intervalSec, movementBudget: c.movementBudget, diffFilters: c.diffFilters, pvpDiffFilters: c.pvpDiffFilters, planDiffFilters: c.planDiffFilters, perVillage: c.perVillage } };
       var now = new Date(), p2 = function (n) { return ('0' + n).slice(-2); };
       var host = (serverBase() ? new URL(serverBase()).hostname : 'data').replace(/[^a-z0-9.\-]/gi, '');
       var name = 'farm-optimizer-' + host + '-' + now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) + '.json';
@@ -720,9 +725,9 @@
     // drop every oasis / PvP / planner result: after a data change they describe data that no
     // longer exists (and a stale lastPvp would skew the combined 20,000-cap warning)
     function resetResults() {
-      STATE.lastRun = null; STATE.lastPvp = null;
+      STATE.lastRun = null; STATE.lastPvp = null; STATE.lastPlan = null;
       ['secRes', 'secPlanRes'].forEach(function (s) { $(s).classList.add('hidden'); });
-      ['cards', 'diffFilters', 'diffTable', 'pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable', 'pvpStatus', 'mpCards', 'mpTroops', 'mpTable'].forEach(function (s) { $(s).innerHTML = ''; });
+      ['cards', 'diffFilters', 'diffTable', 'pvpWarn', 'pvpCards', 'pvpUsage', 'pvpFilters', 'pvpTable', 'pvpStatus', 'mpCards', 'mpTroops', 'mpFilters', 'mpTable'].forEach(function (s) { $(s).innerHTML = ''; });
     }
     function renderCavRow(rowEl, preset, onToggle) {
       rowEl.innerHTML = '';
@@ -1016,22 +1021,39 @@
       if (skipN) cards.push({ k: 'Skipped', v: skipN });
       $('cards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('') + (over ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">oasis + PvP combined — over the 20,000 movement cap</div></div>' : '');
       // (no method line — solver/cap diagnostics dropped; per-village usage lives in the village table)
+      renderDiff(DIFF_VIEWS.oasis, rows);
+    }
+    // The two oasis plan diffs — Oasis Optimizer and Movement planner — share one renderer. A view
+    // names its containers, its own persisted add/move/keep/remove toggles, the button that
+    // re-solves (for the pending-skip note), and its last run. Skips are global: one list for both.
+    var DIFF_VIEWS = {
+      oasis: { filters: 'diffFilters', table: 'diffTable', cfg: 'diffFilters', rerun: 'Optimise',
+               last: function () { return STATE.lastRun; } },
+      plan: { filters: 'mpFilters', table: 'mpTable', cfg: 'planDiffFilters', rerun: 'Calculate', moves: true,
+              empty: 'Nothing farmable under this budget, and nothing farmed today — raise the Movement budget or widen the filters.',
+              last: function () { return STATE.lastPlan; } }
+    };
+    function renderDiff(view, rows) {
       var counts = { add: 0, move: 0, keep: 0, remove: 0 };
       rows.forEach(function (r) { counts[r.status]++; });
-      var df = STATE.data.config.diffFilters; // persisted add/move/keep/remove toggles
-      $('diffFilters').innerHTML = ['add', 'move', 'keep', 'remove'].map(function (s) {
+      var df = STATE.data.config[view.cfg]; // persisted add/move/keep/remove toggles
+      $(view.filters).innerHTML = ['add', 'move', 'keep', 'remove'].map(function (s) {
         var on = df[s] !== false;
         return '<label class="chk' + (on ? ' on' : '') + '" data-st="' + s + '"><input type="checkbox" ' + (on ? 'checked' : '') + '> ' + s + ' <span class="muted">' + counts[s] + '</span></label>';
       }).join('');
-      Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) {
+      Array.prototype.forEach.call($(view.filters).querySelectorAll('label'), function (l) {
         l.querySelector('input').addEventListener('change', function (ev) {
           l.classList.toggle('on', ev.target.checked);
-          STATE.data.config.diffFilters[l.getAttribute('data-st')] = ev.target.checked;
+          STATE.data.config[view.cfg][l.getAttribute('data-st')] = ev.target.checked;
           persist();
-          drawDiff(rows);
+          drawDiff(view, rows);
         });
       });
-      drawDiff(rows);
+      drawDiff(view, rows);
+    }
+    // redraw every diff on screen (a skip changed, or another tab synced) — keeps filters + collapse
+    function redrawDiffs() {
+      Object.keys(DIFF_VIEWS).forEach(function (k) { var v = DIFF_VIEWS[k], last = v.last(); if (last) drawDiff(v, last.rows); });
     }
     // grouping key: current holder for keep/move/remove; destination for an add (no current holder).
     // Keyed on the village DID (not name — Travian allows duplicate names that would otherwise merge).
@@ -1051,7 +1073,7 @@
       if (r.status === 'remove') return esc(r.reason || '');
       return '';
     }
-    function rowHtml(r) {
+    function rowHtml(r, view, last) {
       var k = r.x + '|' + r.y;
       var nowSkipped = isSkipped(k);
       var wasRemoveSkipped = (r.status === 'remove' && r.reason === 'skipped');
@@ -1064,10 +1086,12 @@
       // a skip/unskip clicked since the last Optimise = pending — only on rows that have a control,
       // so a duplicate/over-capacity remove row for the same tile doesn't show an unactionable note.
       var pending = hasCtrl && ((nowSkipped && !wasRemoveSkipped) || (!nowSkipped && wasRemoveSkipped));
-      var note = pending ? (nowSkipped ? ' <span class="err">· will skip on next Optimise</span>' : ' <span class="err">· will re-add on next Optimise</span>') : '';
+      var note = pending ? ' <span class="err">· will ' + (nowSkipped ? 'skip' : 're-add') + ' on next ' + view.rerun + '</span>' : '';
       var d = rowDist(r);
+      // planner: the outgoing movements this oasis draws from the pool (its planned village's)
+      var mv = view.moves ? '<td class="num">' + (r.status === 'remove' || last.moves[k] == null ? '<span class="muted">—</span>' : last.moves[k]) + '</td>' : '';
       return '<tr' + (pending ? ' class="pending"' : '') + '><td><span class="badge b-' + r.status + '">' + r.status + '</span></td>'
-        + '<td>' + mapLink(r.x, r.y) + '</td><td class="muted num">' + (d == null ? '—' : d.toFixed(1)) + '</td><td>' + typeLabel(r.bonuses) + '</td>'
+        + '<td>' + mapLink(r.x, r.y) + '</td><td class="muted num">' + (d == null ? '—' : d.toFixed(1)) + '</td>' + mv + '<td>' + typeLabel(r.bonuses) + '</td>'
         + '<td class="muted">' + rowDetail(r) + note + '</td><td>' + ctrl + '</td></tr>';
     }
     // collapse state of the village groups (details.vgroup), keyed by data-g — read back before a
@@ -1081,9 +1105,9 @@
       return '<details class="vgroup" data-g="' + esc(String(g)) + '"' + (states[String(g)] === false ? '' : ' open')
         + '><summary class="vgroup-h">' + headHtml + '</summary>';
     }
-    function drawDiff(rows) {
-      var show = {}; Array.prototype.forEach.call($('diffFilters').querySelectorAll('label'), function (l) { show[l.getAttribute('data-st')] = l.querySelector('input').checked; });
-      var wasOpen = openStates($('diffTable'));
+    function drawDiff(view, rows) {
+      var show = {}; Array.prototype.forEach.call($(view.filters).querySelectorAll('label'), function (l) { show[l.getAttribute('data-st')] = l.querySelector('input').checked; });
+      var wasOpen = openStates($(view.table)), last = view.last();
       var ord = {}, nameByDid = {}; STATE.data.villages.forEach(function (v, i) { ord[v.did] = i; nameByDid[v.did] = v.name; });
       var statusOrder = { add: 0, move: 1, keep: 2, remove: 3 };
       var groups = {}, names = [], shownKeys = {};
@@ -1099,8 +1123,10 @@
         var label = nameByDid[g]; if (label == null) label = UNKNOWN_VIL;
         var list = groups[g].slice().sort(function (a, b) { return (statusOrder[a.status] - statusOrder[b.status]) || (a.x - b.x) || (a.y - b.y); });
         html += vgroupTag(wasOpen, g, esc(label) + ' <span class="muted">(' + list.length + ')</span>')
-          + '<table><tr><th>Action</th><th>Oasis</th><th class="num">Dist</th><th>Type</th><th>Detail</th><th></th></tr>'
-          + list.map(rowHtml).join('') + '</table></details>';
+          + '<table><tr><th>Action</th><th>Oasis</th><th class="num">Dist</th>'
+          + (view.moves ? '<th class="num" title="ceil(travel / interval) — outgoing movements this oasis draws from the pool, from its planned village">Moves</th>' : '')
+          + '<th>Type</th><th>Detail</th><th></th></tr>'
+          + list.map(function (r) { return rowHtml(r, view, last); }).join('') + '</table></details>';
       });
       // "Skipped": every skipped oasis not already shown as a visible row above (genuinely not farmed,
       // OR hidden by a status filter) — guarantees each skip is reachable with an unskip exactly once.
@@ -1115,18 +1141,20 @@
               + '</td><td><button class="mini unskip" data-key="' + esc(k) + '">unskip</button></td></tr>';
           }).join('') + '</table></details>';
       }
-      $('diffTable').innerHTML = html || '<p class="muted">No rows for the selected filters.</p>';
+      $(view.table).innerHTML = html || '<p class="muted">' + (!rows.length && view.empty ? view.empty : 'No rows for the selected filters.') + '</p>';
     }
-    // skip / unskip (delegated): updates the persisted set + re-decorates the current view.
-    // The assignment itself recomputes on the next Optimise (no live re-solve).
-    $('diffTable').addEventListener('click', function (ev) {
+    // skip / unskip (delegated, both diffs): updates the persisted set + re-decorates every diff.
+    // The assignment itself recomputes on the next Optimise / Calculate (no live re-solve).
+    function onSkipClick(ev) {
       var b = ev.target.closest && ev.target.closest('button.skip, button.unskip'); if (!b) return;
       var k = b.getAttribute('data-key'); if (!k) return;
       var arr = STATE.data.skipped; var i = arr.indexOf(k);
       if (b.classList.contains('skip')) { if (i < 0) arr.push(k); } else if (i >= 0) arr.splice(i, 1);
       persist();
-      if (STATE.lastRun) drawDiff(STATE.lastRun.rows); // re-decorate; keeps current filters; re-solve on Optimise
-    });
+      redrawDiffs(); // re-decorate; keeps current filters; re-solve on Optimise / Calculate
+    }
+    $('diffTable').addEventListener('click', onSkipClick);
+    $('mpTable').addEventListener('click', onSkipClick);
 
     // ── PvP rebalance (see CONTEXT.md "PvP optimizer" + ADR-0004) ──
     function unitName(slot) {
@@ -1239,7 +1267,8 @@
     // The oasis optimizer's instance, solved against ONE pooled Movement budget shared by all
     // Role-pve villages (stocks ignored; budgetOverride only prunes pairs that could never fit the
     // pool — solvePool enforces the pooled ceiling). The cavalry / resource selections are the
-    // planner's own copies. Display only — no plan diff; lists shown per oasis as info.
+    // planner's own copies. The result is shown as a plan diff vs the current farm lists (same
+    // renderer as the Oasis Optimizer, own status toggles) plus the per-village troops to train.
     function gatherPlanCfg(budget) {
       var intervalMin = STATE.data.config.intervalSec / 60;
       var perVillage = {}, included = [];
@@ -1264,6 +1293,10 @@
       if (!cfg.includedDids.length) { alert('No village has Role = pve — set roles in the village table (Data & villages tab).'); return; }
       var inst = PVE.buildInstance(STATE.data, cfg);
       var result = PVE.solvePool(inst, N); // cheapest-first against the pool — provably optimal, no ILP
+      var rows = PVE.planDiff(STATE.data, inst, result, STATE.data.skipped, { pooled: true });
+      var moves = {}; // oasis key -> outgoing movements from its planned village (the diff's Moves column)
+      result.perVillage.forEach(function (list) { list.forEach(function (p) { var o = inst.oases[p.oi]; moves[o.x + '|' + o.y] = p.out; }); });
+      STATE.lastPlan = { inst: inst, result: result, rows: rows, moves: moves };
       renderPlanResults(inst, result, N);
       $('secPlanRes').classList.remove('hidden');
       $('secPlanRes').scrollIntoView({ behavior: 'smooth' });
@@ -1278,6 +1311,7 @@
         { k: 'Movements used / budget', v: result.movements.toLocaleString() + ' / ' + budget.toLocaleString(), warn: over },
         { k: 'Villages used', v: inst.villages.filter(function (_, i) { return result.used[i] > 0; }).length + ' / ' + inst.villages.length }
       ];
+      if ((STATE.data.skipped || []).length) cards.push({ k: 'Skipped', v: STATE.data.skipped.length });
       $('mpCards').innerHTML = cards.map(function (c) { return '<div class="card' + (c.warn ? ' warn' : '') + '"><div class="v">' + c.v + '</div><div class="k">' + c.k + '</div></div>'; }).join('')
         + (over ? '<div class="card warn"><div class="v">⚠ ' + combined.toLocaleString() + '</div><div class="k">planner + PvP combined — over the 20,000 movement cap</div></div>' : '');
       // per-village pool draw + train-delta: the pool consumes OUTGOING movements (the game's
@@ -1306,35 +1340,7 @@
       var foot = '<tr><td><b>Account</b></td><td class="num"><b>' + totOases + '</b></td><td class="num"><b>' + totMov.toLocaleString() + '</b></td><td class="num"><b>' + totNeed.toLocaleString() + '</b></td>'
         + slots.map(function (s) { return '<td class="num"><b>' + (totTrain[s] > 0 ? totTrain[s].toLocaleString() : '—') + '</b></td>'; }).join('') + '</tr>';
       $('mpTroops').innerHTML = head + body + foot;
-      drawPlanTable(inst, result);
-    }
-    function drawPlanTable(inst, result) {
-      // farm-list membership per tile — display only, same shape as the Oasis browser's column
-      var vNm = {}; STATE.data.villages.forEach(function (v) { vNm[v.did] = v.name; });
-      var listsByKey = {};
-      (STATE.data.farmLists || []).forEach(function (l) {
-        var tseen = {};
-        (l.targets || []).forEach(function (t) {
-          var k = t.x + '|' + t.y;
-          if (tseen[k]) return; tseen[k] = 1; // a list targeting a tile twice is one membership
-          (listsByKey[k] || (listsByKey[k] = [])).push({ name: l.name, village: l.villageName || vNm[l.villageDid] || '' });
-        });
-      });
-      var html = '';
-      var wasOpen = openStates($('mpTable'));
-      inst.villages.forEach(function (iv, vi) {
-        var assigned = result.perVillage[vi];
-        if (!assigned.length) return; // villages with nothing assigned still show in the troop table above
-        var rows = assigned.slice().sort(function (a, b) { return (a.dist - b.dist) || (a.oi - b.oi); });
-        html += vgroupTag(wasOpen, iv.did, esc(iv.name) + ' <span class="muted">(' + assigned.length + (assigned.length === 1 ? ' oasis' : ' oases') + ' · ' + result.outUsed[vi].toLocaleString() + (result.outUsed[vi] === 1 ? ' movement' : ' movements') + ')</span>')
-          + '<table><tr><th>Oasis</th><th class="num">Dist</th><th class="num" title="ceil(travel / interval) — outgoing movements this oasis draws from the pool (outbound waves only)">Moves</th><th class="num" title="ceil(2 × travel / interval) — rainbows in flight = troops of EACH selected type this oasis ties up">Each</th><th>Type</th><th>In farm list</th></tr>'
-          + rows.map(function (p) {
-              var o = inst.oases[p.oi];
-              var lists = (listsByKey[o.x + '|' + o.y] || []).map(function (l) { return '<span title="' + esc(l.village) + '">' + esc(l.name) + '</span>'; }).join(', ');
-              return '<tr><td>' + mapLink(o.x, o.y) + '</td><td class="num">' + p.dist.toFixed(1) + '</td><td class="num">' + p.out + '</td><td class="num">' + p.cost + '</td><td>' + typeLabel(o.bonuses) + '</td><td class="muted">' + (lists || '—') + '</td></tr>';
-            }).join('') + '</table></details>';
-      });
-      $('mpTable').innerHTML = html || '<p class="muted">Nothing farmable under this budget — raise the Movement budget or widen the filters.</p>';
+      renderDiff(DIFF_VIEWS.plan, STATE.lastPlan.rows);
     }
 
     // ── tabs (active tab persisted) ──
@@ -1397,7 +1403,15 @@
       STATE.data.farmLists = []; resetResults();
       applyData('Forgot ' + n + ' farm lists — re-send the farm-list pages (expanded) to capture the current ones.');
     });
-    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); STATE.controls = false; resetResults(); try { localStorage.removeItem(STORE); } catch (e) {} ['secCfg', 'secVil', 'secRun', 'secBrowse', 'secPvp', 'secPlan'].forEach(function (s) { $(s).classList.add('hidden'); }); ['hintOasis', 'hintBrowse', 'hintPvp', 'hintPlan'].forEach(function (s) { $(s).classList.remove('hidden'); }); $('cavRow').innerHTML = ''; $('mpCavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('mpBudget').value = 1000; renderTribeSel(); setTab('data'); status('Cleared.'); });
+    // back to the empty first-run screen (Clear here, or a Clear in another calculator tab)
+    function clearUi() {
+      STATE.controls = false; resetResults();
+      ['secCfg', 'secVil', 'secRun', 'secBrowse', 'secPvp', 'secPlan'].forEach(function (s) { $(s).classList.add('hidden'); });
+      ['hintOasis', 'hintBrowse', 'hintPvp', 'hintPlan'].forEach(function (s) { $(s).classList.remove('hidden'); });
+      $('cavRow').innerHTML = ''; $('mpCavRow').innerHTML = ''; $('brVil').innerHTML = ''; $('gIntSec').value = 300; $('mpBudget').value = 1000;
+      renderTribeSel(); setTab('data');
+    }
+    $('btnClear').addEventListener('click', function () { if (!confirm('Clear all imported data? You will need to re-scan and re-send pages.')) return; STATE.data = blank(); try { localStorage.removeItem(STORE); } catch (e) {} clearUi(); status('Cleared.'); });
     $('btnApplyAll').addEventListener('click', applyAll);
     $('btnRun').addEventListener('click', runOptimize);
     $('btnPvp').addEventListener('click', runPvp);
@@ -1405,6 +1419,25 @@
     $('brVil').addEventListener('change', renderBrowse);
     $('brMin').addEventListener('input', renderBrowse);
     $('brMax').addEventListener('input', renderBrowse);
+
+    // ── keep calculator tabs in sync ──
+    // Every tab holds the whole dataset and saves all of it, so a second tab (e.g. the one the
+    // collector opened) used to write back its stale copy and silently undo edits made here —
+    // seen live as a TS level that "didn't save". Now, when another tab saves, this one adopts
+    // that data. The tab on screen stays this window's own, and nothing is saved back while
+    // adopting, so two tabs can't ping-pong.
+    function dataSig(d) { var c = d.config; return JSON.stringify([d.server, d.tribe, d.mapRadius, d.villages, d.oases, d.farmLists, d.pendingTroops, c.intervalSec, c.perVillage]); }
+    window.addEventListener('storage', function (ev) {
+      if (ev.key !== STORE && ev.key !== null) return; // null = the whole storage was cleared
+      var before = dataSig(STATE.data), tab = STATE.data.config.activeTab;
+      STATE.syncing = true;
+      try {
+        restore(); STATE.data.config.activeTab = tab;
+        if (dataSig(STATE.data) !== before) resetResults(); // results described the old data (a skip or filter change keeps them)
+        if (STATE.data.villages.length || STATE.data.oases.length) { applyData('Updated from another calculator tab.'); redrawDiffs(); }
+        else { clearUi(); status('Cleared in another calculator tab.'); }
+      } finally { STATE.syncing = false; }
+    });
 
     // ── collector hand-off (postMessage) ──
     // only an https gameworld (travian.com / *.travian.com — the collector's @match) may post data;

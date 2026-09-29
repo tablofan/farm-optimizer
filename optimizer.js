@@ -333,15 +333,17 @@
   // still rides along so the UI can report troops to train (round-trip waves) per village.
   // Expects an instance built with budgetOverride = the pool (pairs pruned only at out > pool);
   // per-village v.budget is NOT consulted here.
+  // Keep-biased like the oasis solve: when movements AND rainbows tie, the village that farms the
+  // oasis today wins (no pointless move), and at the budget edge a farmed oasis is taken before an
+  // equally cheap unfarmed one (a keep, not a remove + add). Count and movements are unchanged.
   function solvePool(inst, budget) {
     var left = (budget != null && isFinite(budget) && budget > 0) ? Math.floor(budget) : 0;
-    var best = {}; // oi -> its cheapest pair (tie-break: rainbows, distance, village order — deterministic)
-    inst.pairs.forEach(function (p) {
-      var b = best[p.oi];
-      if (!b || p.out < b.out || (p.out === b.out && (p.cost < b.cost || (p.cost === b.cost && (p.dist < b.dist || (p.dist === b.dist && p.vi < b.vi)))))) best[p.oi] = p;
-    });
+    // per-oasis choice: movements, rainbows, current holder, distance, village order (deterministic)
+    function cheaper(a, b) { return a.out - b.out || a.cost - b.cost || curFirst(a, b) || a.dist - b.dist || a.vi - b.vi; }
+    var best = {}; // oi -> its cheapest pair
+    inst.pairs.forEach(function (p) { var b = best[p.oi]; if (!b || cheaper(p, b) < 0) best[p.oi] = p; });
     var order = Object.keys(best).map(function (k) { return best[k]; }).sort(function (a, b) {
-      return a.out - b.out || a.cost - b.cost || a.dist - b.dist || a.oi - b.oi;
+      return a.out - b.out || a.cost - b.cost || curFirst(a, b) || a.dist - b.dist || a.oi - b.oi;
     });
     var assign = {};
     for (var i = 0; i < order.length; i++) {
@@ -357,7 +359,10 @@
   // Returns rows grouped per village action: keep/add/move/remove.
   // `skipped` (coord key set) lets a currently-farmed Skipped oasis be tagged reason 'skipped'
   // rather than misattributed to the resource filter (both are absent from inst.oases).
-  function planDiff(data, inst, result, skipped) {
+  // opts.pooled (Movement planner — result from solvePool): the budget is one pool of outgoing
+  // movements, so the capacity reasons name that pool instead of per-village troop budgets.
+  function planDiff(data, inst, result, skipped, opts) {
+    var pooled = !!(opts && opts.pooled);
     var key = function (x, y) { return x + '|' + y; };
     var skippedKey = skipLookup(skipped);
     // optimal: oasisKey -> villageDid
@@ -422,8 +427,8 @@
       // an oasis whose bonus never parsed has no resource bucket, so no filter setting admits it
       var reason = skippedKey[k] ? 'skipped'
         : !freeByKey[k] ? (primaryRes(o.bonuses) ? 'excluded by resource filter' : 'bonus unreadable — rescan to classify it')
-        : !reachableByKey[k] ? 'unaffordable (cost exceeds every budget)'
-        : 'over capacity / not optimal';
+        : !reachableByKey[k] ? (pooled ? 'unaffordable (needs more movements than the whole budget)' : 'unaffordable (cost exceeds every budget)')
+        : pooled ? 'over the movement budget' : 'over capacity / not optimal';
       curByKey[k].forEach(function (c) {
         rows.push(row(o, 'remove', null, c.did, vName, reason));
       });

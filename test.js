@@ -990,6 +990,42 @@ t('solvePool: equal outgoing cost -> fewer rainbows first, per oasis and across 
   assert.deepStrictEqual(r.assign, { 1: 0 }, 'pool of 1 goes to the 1-rainbow oasis');
   assert.strictEqual(PVE.solvePool(inst, 2).assign[0], 1, 'oasis 0 served by B (2 rainbows) over A (3)');
 });
+t('solvePool: a full cost tie keeps the current holder, even when another village is closer', () => {
+  const inst = { villages: [{ did: 1, name: 'A', budget: 9 }, { did: 2, name: 'B', budget: 9 }],
+    oases: [{ x: 0, y: 0 }], maxPossible: 1,
+    pairs: [{ oi: 0, vi: 0, cost: 2, out: 1, dist: 3, travelMin: 3 }, { oi: 0, vi: 1, cost: 2, out: 1, dist: 7, travelMin: 7, cur: true }] };
+  const r = PVE.solvePool(inst, 5);
+  assert.deepStrictEqual(r.assign, { 0: 1 }, 'B farms it today — equal movements + rainbows is no reason to move');
+  assert.strictEqual(r.kept, 1);
+  inst.pairs[0].out = 0; // A now strictly cheaper in movements -> the move is worth it
+  assert.deepStrictEqual(PVE.solvePool(inst, 5).assign, { 0: 0 }, 'a real saving still moves it');
+});
+t('solvePool: at the budget edge an equally cheap farmed oasis is taken before an unfarmed one', () => {
+  const inst = { villages: [{ did: 1, name: 'A', budget: 9 }], oases: [{ x: 0, y: 0 }, { x: 1, y: 0 }], maxPossible: 2,
+    pairs: [{ oi: 0, vi: 0, cost: 2, out: 1, dist: 2, travelMin: 2 }, { oi: 1, vi: 0, cost: 2, out: 1, dist: 4, travelMin: 4, cur: true }] };
+  const r = PVE.solvePool(inst, 1);
+  assert.deepStrictEqual(r.assign, { 1: 0 }, 'keep the farmed one (a keep) rather than swap it for a closer add');
+  assert.strictEqual(r.count, 1); assert.strictEqual(r.movements, 1);
+});
+t('planDiff pooled: capacity reasons name the movement budget', () => {
+  // A at 0|0 farms two oases; a pool of 1 keeps only the nearer one. A third is out of reach of the pool.
+  const data = { mapRadius: 200, villages: [{ did: 1, name: 'A', x: 0, y: 0, troops: {} }],
+    oases: [{ x: 1, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }, { x: 2, y: 0, bonuses: [{ res: 'crop', pct: 25 }] },
+            { x: 150, y: 0, bonuses: [{ res: 'crop', pct: 25 }] }],
+    farmLists: [{ listId: 1, name: 'L', villageDid: 1, targets: [{ x: 1, y: 0 }, { x: 2, y: 0 }, { x: 150, y: 0 }] }] };
+  // 1|0 and 2|0 cost 1 movement each (so the pool of 1 takes one); 150|0 needs more than the pool
+  const inst = PVE.buildInstance(data, { units: UNITS.huns, selectedSlots: ['t6'], includedDids: [1],
+    resourceFilter: { crop: true }, perVillage: { 1: { ts: 0, interval: 5, artefact: 1 } }, budgetOverride: 1 });
+  const r = PVE.solvePool(inst, 1);
+  assert.strictEqual(r.count, 1);
+  const rows = PVE.planDiff(data, inst, r, [], { pooled: true });
+  const at = x => rows.find(q => q.x === x);
+  assert.strictEqual(at(1).status, 'keep');
+  assert.strictEqual(at(2).status, 'remove'); assert.strictEqual(at(2).reason, 'over the movement budget');
+  assert.strictEqual(at(150).reason, 'unaffordable (needs more movements than the whole budget)');
+  const plain = PVE.planDiff(data, inst, r, []);
+  assert.strictEqual(plain.find(q => q.x === 2).reason, 'over capacity / not optimal', 'default wording unchanged');
+});
 function gateInst(n) { // n cost-1 pairs, budget 10 -> greedy 10 < maxPossible n
   const oases = [], pairs = [];
   for (let i = 0; i < n; i++) { oases.push({ x: i, y: 0 }); pairs.push({ oi: i, vi: 0, cost: 1, out: 1, dist: i + 1, travelMin: i + 1 }); }
